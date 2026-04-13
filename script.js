@@ -9,7 +9,9 @@ window.addEventListener('resize', resize, {passive:true});
 resize();
 
 const params = {
-  friction: 0.98, // per-frame multiplier baseline
+  // friction is a fraction in [0,1]. It represents the proportional
+  // deceleration factor applied per second (higher = stronger braking).
+  friction: 0.02,
   diskRadius: 36
 };
 
@@ -28,9 +30,27 @@ let mouseBuf = []; // {x,y,t}
 
 function update(dt){
   if(!dragging){
-    const friction = params.friction; // per frame multiplier
-    disk.vx *= Math.pow(friction, dt*60);
-    disk.vy *= Math.pow(friction, dt*60);
+    const friction = params.friction; // 0..1 fractional braking
+    // frameMultiplier scales the per-second friction; use 1 for direct effect
+    const frameMultiplier = 1;
+
+    // compute current speed and apply proportional deceleration
+    const speed = Math.hypot(disk.vx, disk.vy);
+    if(speed > 1e-6 && friction > 0){
+      const decel = speed * friction * dt * frameMultiplier;
+      const rawNewSpeed = speed - decel;
+      let newSpeed;
+      // if the sign would change (overshoot past zero), keep original speed
+      if(Math.sign(rawNewSpeed) !== Math.sign(speed)){
+        newSpeed = speed;
+      } else {
+        newSpeed = rawNewSpeed;
+      }
+      const scale = newSpeed / speed;
+      disk.vx *= scale;
+      disk.vy *= scale;
+    }
+
     disk.x += disk.vx * dt;
     disk.y += disk.vy * dt;
 
