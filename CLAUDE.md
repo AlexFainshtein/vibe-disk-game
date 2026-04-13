@@ -31,5 +31,5 @@ ES modules loaded via `<script type="module" src="main.js">` — must be served 
 
 ## Notes
 
-- Friction is a per-second proportional factor in [0,1], not a multiplier. The reset button currently sets `friction = 0.98`, which is inconsistent with the default `0.02` elsewhere — a known quirk in [controls.js](controls.js).
+- Friction is a per-second proportional factor in [0,1], not a multiplier.
 - The canvas is resized to `window.innerWidth/innerHeight` on load and resize, but the disk position is not re-centered on resize (only on `load`).
