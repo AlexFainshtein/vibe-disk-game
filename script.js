@@ -12,7 +12,9 @@ const params = {
   // friction is a fraction in [0,1]. It represents the proportional
   // deceleration factor applied per second (higher = stronger braking).
   friction: 0.02,
-  diskRadius: 36
+  diskRadius: 36,
+  frameMultiplier: 1,
+  wallBounce: -0.9
 };
 
 const disk = {
@@ -31,8 +33,7 @@ let mouseBuf = []; // {x,y,t}
 function update(dt){
   if(!dragging){
     const friction = params.friction; // 0..1 fractional braking
-    // frameMultiplier scales the per-second friction; use 1 for direct effect
-    const frameMultiplier = 1;
+    const frameMultiplier = params.frameMultiplier;
 
     // compute current speed and apply proportional deceleration
     const speed = Math.hypot(disk.vx, disk.vy);
@@ -55,10 +56,10 @@ function update(dt){
     disk.y += disk.vy * dt;
 
     // wall collisions
-    if(disk.x - disk.r < 0){ disk.x = disk.r; disk.vx *= -0.9 }
-    if(disk.x + disk.r > W){ disk.x = W - disk.r; disk.vx *= -0.9 }
-    if(disk.y - disk.r < 0){ disk.y = disk.r; disk.vy *= -0.9 }
-    if(disk.y + disk.r > H){ disk.y = H - disk.r; disk.vy *= -0.9 }
+    if(disk.x - disk.r < 0){ disk.x = disk.r; disk.vx *= params.wallBounce }
+    if(disk.x + disk.r > W){ disk.x = W - disk.r; disk.vx *= params.wallBounce }
+    if(disk.y - disk.r < 0){ disk.y = disk.r; disk.vy *= params.wallBounce }
+    if(disk.y + disk.r > H){ disk.y = H - disk.r; disk.vy *= params.wallBounce }
   }
 }
 
