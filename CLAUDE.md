@@ -16,6 +16,20 @@ python -m http.server 8000
 
 Then open http://localhost:8000. To iterate, edit `script.js` / `style.css` / `index.html` and refresh.
 
+## Testing on an Android phone (same Wi-Fi, with auto-reload)
+
+Use `live-server` instead of `python -m http.server` to get reload-on-save:
+
+```
+npx live-server --port=8000 --host=0.0.0.0
+```
+
+(If PowerShell blocks `npx` with an execution-policy error, use `npx.cmd` instead.)
+
+Find your PC's LAN IP — run `ipconfig` and grab the IPv4 address under your Wi-Fi adapter (e.g. `192.168.1.134`; DHCP-assigned, may change between sessions). Allow Node.js through Windows Firewall on the **Private** profile when prompted, and confirm the Wi-Fi network's profile is set to Private (Public blocks LAN traffic).
+
+On the phone (same Wi-Fi), open `http://<PC-LAN-IP>:8000`. Editing any file and saving auto-refreshes the phone. http (not https) is fine — this app uses no secure-context APIs.
+
 ## Architecture
 
 ES modules loaded via `<script type="module" src="main.js">` — must be served over http:// (not `file://`).
