@@ -44,7 +44,7 @@ export function initControls(){
   });
 
   reset.addEventListener('click', ()=>{
-    params.friction = 0.02; params.diskRadius = 36;
+    params.friction = 0.02; params.diskRadius = 60;
     rSlider.value = params.diskRadius; fSlider.value = params.friction;
     rVal.textContent = params.diskRadius; fVal.textContent = params.friction;
     disk.r = params.diskRadius; saveSettings();

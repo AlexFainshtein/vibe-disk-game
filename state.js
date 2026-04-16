@@ -12,7 +12,7 @@ export const params = {
   // friction is a fraction in [0,1]. It represents the proportional
   // deceleration factor applied per second (higher = stronger braking).
   friction: 0.02,
-  diskRadius: 36,
+  diskRadius: 60,
   frameMultiplier: 1,
   wallBounce: -0.9
 };
