@@ -1,0 +1,15 @@
+.git/
+.github/
+.claude/
+.agents/
+.firebase/
+.firebaserc
+.gitignore
+firebase.json
+skills-lock.json
+CLAUDE.md
+README.md
+run.bat
+deploy.bat
+node_modules/
+*.log
