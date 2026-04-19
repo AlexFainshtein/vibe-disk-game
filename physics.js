@@ -1,4 +1,7 @@
 import { canvas, params, disk, input } from './state.js';
+import { playKnock } from './sound.js';
+
+const MAX_BOUNCE_SPEED = 1200;
 
 export function update(dt){
   if(input.dragging) return;
@@ -26,8 +29,10 @@ export function update(dt){
   disk.y += disk.vy * dt;
 
   const W = canvas.width, H = canvas.height;
-  if(disk.x - disk.r < 0){ disk.x = disk.r; disk.vx *= params.wallBounce; }
-  if(disk.x + disk.r > W){ disk.x = W - disk.r; disk.vx *= params.wallBounce; }
-  if(disk.y - disk.r < 0){ disk.y = disk.r; disk.vy *= params.wallBounce; }
-  if(disk.y + disk.r > H){ disk.y = H - disk.r; disk.vy *= params.wallBounce; }
+  let bounced = false, bounceSpeed = 0;
+  if(disk.x - disk.r < 0){ disk.x = disk.r; bounceSpeed = Math.max(bounceSpeed, Math.abs(disk.vx)); disk.vx *= params.wallBounce; bounced = true; }
+  if(disk.x + disk.r > W){ disk.x = W - disk.r; bounceSpeed = Math.max(bounceSpeed, Math.abs(disk.vx)); disk.vx *= params.wallBounce; bounced = true; }
+  if(disk.y - disk.r < 0){ disk.y = disk.r; bounceSpeed = Math.max(bounceSpeed, Math.abs(disk.vy)); disk.vy *= params.wallBounce; bounced = true; }
+  if(disk.y + disk.r > H){ disk.y = H - disk.r; bounceSpeed = Math.max(bounceSpeed, Math.abs(disk.vy)); disk.vy *= params.wallBounce; bounced = true; }
+  if(bounced) playKnock(Math.min(bounceSpeed / MAX_BOUNCE_SPEED, 1));
 }
