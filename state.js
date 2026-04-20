@@ -26,6 +26,15 @@ export const disk = {
   color: '#ffb86b'
 };
 
+export const bar = {
+  y: canvas.height * 0.85,
+  prevY: canvas.height * 0.85,
+  vy: 0,
+  height: 16,
+  color: '#88aacc',
+  dragging: false
+};
+
 export const input = {
   dragging: false,
   mouseBuf: [] // {x,y,t}

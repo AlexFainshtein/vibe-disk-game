@@ -1,4 +1,4 @@
-import { canvas, disk, input } from './state.js';
+import { canvas, disk, input, bar } from './state.js';
 
 function eventPos(e){
   if(e.touches && e.touches.length) e = e.touches[0];
@@ -12,6 +12,13 @@ function distance(a,b){
 export function setupInput(){
   canvas.addEventListener('pointerdown', (ev)=>{
     const p = eventPos(ev);
+    // Check bar hit first (within grab zone)
+    const barGrab = 24;
+    if(Math.abs(p.y - bar.y) <= barGrab){
+      bar.dragging = true;
+      canvas.setPointerCapture(ev.pointerId);
+      return;
+    }
     if(distance(p, disk) <= disk.r){
       input.dragging = true;
       disk.vx = 0; disk.vy = 0;
@@ -21,14 +28,23 @@ export function setupInput(){
   });
 
   canvas.addEventListener('pointermove', (ev)=>{
-    if(!input.dragging) return;
     const p = eventPos(ev);
+    if(bar.dragging){
+      bar.y = Math.max(0, Math.min(canvas.height - bar.height, p.y));
+      return;
+    }
+    if(!input.dragging) return;
     disk.x = p.x; disk.y = p.y;
     input.mouseBuf.push(p);
     if(input.mouseBuf.length > 6) input.mouseBuf.shift();
   });
 
   canvas.addEventListener('pointerup', (ev)=>{
+    if(bar.dragging){
+      bar.dragging = false;
+      try{ canvas.releasePointerCapture(ev.pointerId); }catch(e){}
+      return;
+    }
     if(!input.dragging) return;
     input.dragging = false;
     const buf = input.mouseBuf;

@@ -1,4 +1,4 @@
-import { canvas, ctx, disk } from './state.js';
+import { canvas, ctx, disk, bar } from './state.js';
 
 export function draw(){
   const W = canvas.width, H = canvas.height;
@@ -7,6 +7,10 @@ export function draw(){
   const g = ctx.createLinearGradient(0,0,0,H);
   g.addColorStop(0,'#071018'); g.addColorStop(1,'#07141a');
   ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+
+  // bar
+  ctx.fillStyle = bar.color;
+  ctx.fillRect(0, bar.y, W, bar.height);
 
   // shadow
   ctx.beginPath();
