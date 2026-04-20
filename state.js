@@ -14,7 +14,7 @@ export const params = {
   friction: 0.02,
   diskRadius: 60,
   frameMultiplier: 1,
-  wallBounce: -0.9
+  bounce: 0.9
 };
 
 export const disk = {

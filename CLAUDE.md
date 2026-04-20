@@ -34,13 +34,13 @@ On the phone (same Wi-Fi), open `http://<PC-LAN-IP>:8000`. Editing any file and 
 
 ES modules loaded via `<script type="module" src="main.js">` — must be served over http:// (not `file://`).
 
-- [index.html](index.html) — canvas element, on-screen UI text, and the floating control panel (sliders for disk size and friction, reset button).
-- [state.js](state.js) — shared mutable state: `canvas`, `ctx`, `params` (friction, diskRadius, frameMultiplier, wallBounce), `disk` (x,y,vx,vy,r), and `input` (dragging, mouseBuf). Also owns the `resize` listener that sizes the canvas to the window.
-- [physics.js](physics.js) — `update(dt)` applies proportional friction (`speed * friction * dt * frameMultiplier`), integrates position, and handles wall bounces (×`params.wallBounce`). Triggers knock sound on bounce. No-op while `input.dragging`.
+- [index.html](index.html) — canvas element, on-screen UI text, and the floating control panel (sliders for disk size, friction, and bounce, plus reset button).
+- [state.js](state.js) — shared mutable state: `canvas`, `ctx`, `params` (friction, diskRadius, frameMultiplier, bounce), `disk` (x,y,vx,vy,r), and `input` (dragging, mouseBuf). Also owns the `resize` listener that sizes the canvas to the window.
+- [physics.js](physics.js) — `update(dt)` applies proportional friction (`speed * friction * dt * frameMultiplier`), integrates position, and handles wall bounces (×`-params.bounce`). Triggers knock sound on bounce. No-op while `input.dragging`.
 - [sound.js](sound.js) — `playKnock(intensity)` synthesizes a wood-on-wood knock via Web Audio API (square wave with fast pitch/volume decay through a lowpass filter). Intensity (0–1) scales volume, pitch, and duration.
 - [render.js](render.js) — `draw()` renders gradient background, disk shadow, disk, and highlight each frame.
 - [input.js](input.js) — `setupInput()` attaches pointerdown/move/up handlers. On release, velocity is computed from the last two samples in `input.mouseBuf` and clamped to 1600 px/s.
-- [controls.js](controls.js) — `initControls()` wires panel sliders to `params` and persists `{friction, diskRadius}` to `localStorage` under key `vibe-settings`.
+- [controls.js](controls.js) — `initControls()` wires panel sliders to `params` and persists `{friction, diskRadius, bounce}` to `localStorage` under key `vibe-settings`.
 - [main.js](main.js) — entry point: imports the modules, wires `setupInput()` + `initControls()`, and runs the `requestAnimationFrame` loop with `dt` clamped to 33ms.
 - [style.css](style.css) — fullscreen canvas + fixed-position overlay styling for `#ui` and `#panel`. Disables pull-to-refresh and touch gestures on mobile via `overscroll-behavior` and `touch-action`.
 - [deploy.bat](deploy.bat) — copies source files into `public/` and runs `firebase deploy`.

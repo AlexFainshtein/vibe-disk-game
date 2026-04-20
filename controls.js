@@ -3,7 +3,7 @@ import { params, disk } from './state.js';
 const STORAGE_KEY = 'vibe-settings';
 
 function saveSettings(){
-  const s = { friction: params.friction, diskRadius: params.diskRadius };
+  const s = { friction: params.friction, diskRadius: params.diskRadius, bounce: params.bounce };
   try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); }catch(e){}
 }
 
@@ -14,6 +14,7 @@ function loadSettings(){
     const s = JSON.parse(raw);
     if(typeof s.friction === 'number') params.friction = s.friction;
     if(typeof s.diskRadius === 'number') params.diskRadius = s.diskRadius;
+    if(typeof s.bounce === 'number') params.bounce = s.bounce;
   }catch(e){}
 }
 
@@ -23,12 +24,16 @@ export function initControls(){
   const rVal = document.getElementById('diskRadiusVal');
   const fSlider = document.getElementById('friction');
   const fVal = document.getElementById('frictionVal');
+  const bSlider = document.getElementById('bounce');
+  const bVal = document.getElementById('bounceVal');
   const reset = document.getElementById('resetDefaults');
 
   rSlider.value = params.diskRadius;
   fSlider.value = params.friction;
+  bSlider.value = params.bounce;
   rVal.textContent = params.diskRadius;
   fVal.textContent = String(params.friction);
+  bVal.textContent = params.bounce.toFixed(2);
   disk.r = params.diskRadius;
 
   rSlider.addEventListener('input', (e)=>{
@@ -43,10 +48,16 @@ export function initControls(){
     saveSettings();
   });
 
+  bSlider.addEventListener('input', (e)=>{
+    params.bounce = Number(e.target.value);
+    bVal.textContent = params.bounce.toFixed(2);
+    saveSettings();
+  });
+
   reset.addEventListener('click', ()=>{
-    params.friction = 0.02; params.diskRadius = 60;
-    rSlider.value = params.diskRadius; fSlider.value = params.friction;
-    rVal.textContent = params.diskRadius; fVal.textContent = params.friction;
+    params.friction = 0.02; params.diskRadius = 60; params.bounce = 0.9;
+    rSlider.value = params.diskRadius; fSlider.value = params.friction; bSlider.value = params.bounce;
+    rVal.textContent = params.diskRadius; fVal.textContent = params.friction; bVal.textContent = params.bounce.toFixed(2);
     disk.r = params.diskRadius; saveSettings();
   });
 }
