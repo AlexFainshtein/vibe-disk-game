@@ -39,7 +39,7 @@ ES modules loaded via `<script type="module" src="main.js">` — must be served 
 - [physics.js](physics.js) — `update(dt)` computes bar velocity from position delta, applies proportional friction, integrates position, handles wall bounces (×`-params.bounce`), and bar collision (velocity reflection + 2× bar velocity). Triggers knock sound on bounce. No-op while `input.dragging`.
 - [sound.js](sound.js) — `playKnock(intensity)` synthesizes a wood-on-wood knock via Web Audio API (square wave with fast pitch/volume decay through a lowpass filter). Intensity (0–1) scales volume, pitch, and duration.
 - [render.js](render.js) — `draw()` renders gradient background, bar, disk shadow, disk, and highlight each frame.
-- [input.js](input.js) — `setupInput()` attaches pointerdown/move/up handlers. Handles both disk dragging (velocity from last two samples, clamped to 1600 px/s) and bar dragging (vertical repositioning).
+- [input.js](input.js) — `setupInput()` attaches pointerdown/move/up handlers. Handles both disk dragging (grab offset to avoid jump, clamped to walls/bar, auto-releases with wall-parallel velocity when pointer leaves disk) and bar dragging (vertical repositioning).
 - [controls.js](controls.js) — `initControls()` wires the Reset button to re-center the disk, zero its velocity, and reset the bar position.
 - [main.js](main.js) — entry point: imports the modules, wires `setupInput()` + `initControls()`, and runs the `requestAnimationFrame` loop with `dt` clamped to 33ms.
 - [style.css](style.css) — fullscreen canvas + fixed-position overlay styling for `#ui` and `#panel`. Disables pull-to-refresh and touch gestures on mobile via `overscroll-behavior` and `touch-action`.
