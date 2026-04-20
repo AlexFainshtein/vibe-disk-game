@@ -1,4 +1,5 @@
 import { canvas, disk, input, bar } from './state.js';
+import { playGrab, playRelease, playScrape } from './sound.js';
 
 function eventPos(e){
   if(e.touches && e.touches.length) e = e.touches[0];
@@ -11,22 +12,27 @@ function distance(a,b){
 
 export function setupInput(){
   let grabOffsetX = 0, grabOffsetY = 0;
+  let barGrabOffset = 0;
+  let prevDivergence = 0;
 
   canvas.addEventListener('pointerdown', (ev)=>{
     const p = eventPos(ev);
-    // Check bar hit first (within grab zone)
-    const barGrab = 24;
-    if(Math.abs(p.y - bar.y) <= barGrab){
+    // Check bar hit (must click directly on the bar)
+    if(p.y >= bar.y && p.y <= bar.y + bar.height){
       bar.dragging = true;
+      barGrabOffset = bar.y - p.y;
+      playGrab();
       canvas.setPointerCapture(ev.pointerId);
       return;
     }
     if(distance(p, disk) <= disk.r){
       input.dragging = true;
+      prevDivergence = 0;
       grabOffsetX = disk.x - p.x;
       grabOffsetY = disk.y - p.y;
       disk.vx = 0; disk.vy = 0;
       input.mouseBuf = [p];
+      playGrab();
       canvas.setPointerCapture(ev.pointerId);
     }
   });
@@ -34,7 +40,16 @@ export function setupInput(){
   canvas.addEventListener('pointermove', (ev)=>{
     const p = eventPos(ev);
     if(bar.dragging){
-      bar.y = Math.max(0, Math.min(canvas.height - bar.height, p.y));
+      const minBarY = disk.r * 2;
+      let newBarY = p.y + barGrabOffset;
+      bar.y = Math.max(minBarY, Math.min(canvas.height - bar.height, newBarY));
+
+      // auto-release if pointer leaves the bar due to clamping
+      if(p.y < bar.y || p.y > bar.y + bar.height){
+        bar.dragging = false;
+        playRelease();
+        try{ canvas.releasePointerCapture(ev.pointerId); }catch(e){}
+      }
       return;
     }
     if(!input.dragging) return;
@@ -48,9 +63,19 @@ export function setupInput(){
     disk.x = clampedX;
     disk.y = clampedY;
 
+    // scrape pip: only when pointer pushes further into the wall
+    const divergence = Math.hypot(newX - clampedX, newY - clampedY);
+    const divergenceIncrease = divergence - prevDivergence;
+    if(divergenceIncrease > 1){
+      const intensity = Math.min(divergenceIncrease / 50, 1);
+      playScrape(intensity);
+    }
+    prevDivergence = divergence;
+
     // if pointer left the disk due to clamping, auto-release
     if(distance(p, disk) > disk.r){
       input.dragging = false;
+      playRelease();
       // compute velocity from mouse buffer, then zero the wall-facing component
       const buf = input.mouseBuf;
       if(buf.length >= 2){
