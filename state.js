@@ -39,3 +39,24 @@ export const input = {
   dragging: false,
   mouseBuf: [] // {x,y,t}
 };
+
+// debug: hit detection state
+export const clickMarker = {
+  active: false,
+  hit: false
+};
+
+// recent disk positions for lag-compensated hit detection
+const HISTORY_SIZE = 5;
+export const diskHistory = [];
+export function recordDiskPosition(){
+  diskHistory.push({x: disk.x, y: disk.y});
+  if(diskHistory.length > HISTORY_SIZE) diskHistory.shift();
+}
+
+// line from click point to disk center
+export const clickLine = {
+  active: false,
+  clickX: 0,
+  clickY: 0
+};

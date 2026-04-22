@@ -1,4 +1,4 @@
-import { canvas, disk, input, bar } from './state.js';
+import { canvas, disk, input, bar, clickMarker, diskHistory, clickLine } from './state.js';
 import { playGrab, playRelease, playScrape } from './sound.js';
 
 function eventPos(e){
@@ -17,6 +17,31 @@ export function setupInput(){
 
   canvas.addEventListener('pointerdown', (ev)=>{
     const p = eventPos(ev);
+    // lag-compensated hit detection: check current + recent positions
+    let hit = false;
+    let hitFrame = -1;
+    if(distance(p, disk) <= disk.r){
+      hit = true;
+      hitFrame = 0;
+    } else {
+      for(let i = diskHistory.length - 1; i >= 0; i--){
+        if(distance(p, diskHistory[i]) <= disk.r){
+          hit = true;
+          hitFrame = diskHistory.length - i;
+          break;
+        }
+      }
+    }
+    if(hit) console.log('Hit! Frame lag:', hitFrame, '(0 = current frame)');
+    else console.log('Miss');
+    clickMarker.hit = hit;
+    clickMarker.active = true;
+
+    // draw line from click point to disk center
+    clickLine.active = true;
+    clickLine.clickX = p.x;
+    clickLine.clickY = p.y;
+
     // Check bar hit (must click directly on the bar)
     if(p.y >= bar.y && p.y <= bar.y + bar.height){
       bar.dragging = true;

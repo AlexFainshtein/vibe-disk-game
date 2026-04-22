@@ -1,4 +1,4 @@
-import { canvas, disk } from './state.js';
+import { canvas, disk, recordDiskPosition } from './state.js';
 import { update } from './physics.js';
 import { draw } from './render.js';
 import { setupInput } from './input.js';
@@ -10,6 +10,7 @@ function loop(t){
   const dt = Math.min(0.033, (t - lastTime)/1000);
   lastTime = t;
   update(dt);
+  recordDiskPosition();
   draw();
   requestAnimationFrame(loop);
 }
