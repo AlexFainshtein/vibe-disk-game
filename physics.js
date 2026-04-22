@@ -1,24 +1,32 @@
-import { canvas, params, disk, input, bar } from './state.js';
+import { canvas, params, disk, bar, anchor } from './state.js';
 import { playKnock } from './sound.js';
 
 const MAX_BOUNCE_SPEED = 1200;
+const SPRING_K = 40;     // spring stiffness (higher = snappier)
+const SPRING_DAMP = 4;   // damping (higher = less oscillation)
 
 export function update(dt){
   // compute bar velocity from position change
   bar.vy = (bar.y - bar.prevY) / dt;
   bar.prevY = bar.y;
 
-  if(input.dragging) return;
-
   const friction = params.friction; // 0..1 fractional braking
   const frameMultiplier = params.frameMultiplier;
 
+  // damped spring toward anchor
+  if(anchor.active){
+    const dx = anchor.x - disk.x;
+    const dy = anchor.y - disk.y;
+    disk.vx += (SPRING_K * dx - SPRING_DAMP * disk.vx) * dt;
+    disk.vy += (SPRING_K * dy - SPRING_DAMP * disk.vy) * dt;
+  }
+
+  // friction (only when spring is not active)
   const speed = Math.hypot(disk.vx, disk.vy);
-  if(speed > 1e-6 && friction > 0){
+  if(!anchor.active && speed > 1e-6 && friction > 0){
     const decel = speed * friction * dt * frameMultiplier;
     const rawNewSpeed = speed - decel;
     let newSpeed;
-    // if the sign would change (overshoot past zero), keep original speed
     if(Math.sign(rawNewSpeed) !== Math.sign(speed)){
       newSpeed = speed;
     } else {

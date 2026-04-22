@@ -1,4 +1,4 @@
-import { canvas, ctx, disk, bar, clickMarker, clickLine } from './state.js';
+import { canvas, ctx, disk, bar, clickMarker, anchor } from './state.js';
 
 export function draw(){
   const W = canvas.width, H = canvas.height;
@@ -39,17 +39,17 @@ export function draw(){
     ctx.stroke();
   }
 
-  // debug: line from click point to disk center (hits only)
-  if(clickLine.active && clickMarker.hit){
+  // spring line from anchor to disk center
+  if(anchor.active){
     ctx.beginPath();
-    ctx.moveTo(clickLine.clickX, clickLine.clickY);
+    ctx.moveTo(anchor.x, anchor.y);
     ctx.lineTo(disk.x, disk.y);
     ctx.strokeStyle = '#00ff00';
     ctx.lineWidth = 2;
     ctx.stroke();
-    // dot at click point
+    // dot at anchor point
     ctx.beginPath();
-    ctx.arc(clickLine.clickX, clickLine.clickY, 5, 0, Math.PI*2);
+    ctx.arc(anchor.x, anchor.y, 5, 0, Math.PI*2);
     ctx.fillStyle = '#00ff00';
     ctx.fill();
   }

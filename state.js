@@ -40,6 +40,13 @@ export const input = {
   mouseBuf: [] // {x,y,t}
 };
 
+// spring anchor: the point the disk is pulled toward
+export const anchor = {
+  active: false,
+  x: 0,
+  y: 0
+};
+
 // debug: hit detection state
 export const clickMarker = {
   active: false,
@@ -53,10 +60,3 @@ export function recordDiskPosition(){
   diskHistory.push({x: disk.x, y: disk.y});
   if(diskHistory.length > HISTORY_SIZE) diskHistory.shift();
 }
-
-// line from click point to disk center
-export const clickLine = {
-  active: false,
-  clickX: 0,
-  clickY: 0
-};
