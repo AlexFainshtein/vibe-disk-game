@@ -1,6 +1,8 @@
 import { canvas, disk, recordDiskPosition } from './state.js';
-import { update } from './physics.js';
 import { draw } from './render.js';
+
+const player = document.body.dataset.player ?? 'alex';
+const { update } = await import(`./${player}-physics.js`);
 import { setupInput } from './input.js';
 import { initControls } from './controls.js';
 
