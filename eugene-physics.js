@@ -34,7 +34,7 @@ export function update(dt){
     const dist = Math.hypot(dx, dy) || 1;
     const rx = dx / dist, ry = dy / dist;   // radial unit (toward anchor)
     const tx = -ry,       ty = rx;           // tangential unit (perpendicular)
-    if(altFrictionEl?.checked){
+    if(altFrictionEl?.dataset.on === 'true'){
       // alt friction: decompose velocity relative to finger into radial + tangential, damp separately
       const relVx = disk.vx - anchorVx;
       const relVy = disk.vy - anchorVy;

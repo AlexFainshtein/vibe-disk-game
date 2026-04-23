@@ -21,6 +21,11 @@ function clampAnchor(x, y){
 export function setupInput(){
   let barGrabOffset = 0;
 
+  // Prevent double-tap-and-hold text-selection loupe on iOS (canvas only, so buttons still work)
+  let lastTouchEnd = 0;
+  canvas.addEventListener('touchend',   () => { lastTouchEnd = Date.now(); }, { passive: true });
+  canvas.addEventListener('touchstart', (e) => { if(Date.now() - lastTouchEnd <= 500) e.preventDefault(); }, { passive: false });
+
   canvas.addEventListener('pointerdown', (ev)=>{
     const p = eventPos(ev);
 
