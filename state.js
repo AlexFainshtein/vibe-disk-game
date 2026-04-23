@@ -9,7 +9,7 @@ window.addEventListener('resize', resize, {passive:true});
 resize();
 
 export const screen = {
-  current: 'alex', // 'alex' or 'eugene'
+  current: document.body.dataset.player ?? 'alex',
   backgrounds: {
     alex:   { top: '#071018', bottom: '#07141a' },
     eugene: { top: '#180710', bottom: '#1a0714' }

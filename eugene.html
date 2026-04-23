@@ -1,0 +1,18 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Vibe Disk Game — Eugene</title>
+  <script>if(!sessionStorage.getItem('fromMenu'))location.replace('index.html');else sessionStorage.removeItem('fromMenu');</script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body data-player="eugene">
+  <canvas id="game"></canvas>
+  <div id="ui">Click the disk to stop it, drag, then release to fling.</div>
+  <div id="panel">
+    <button id="resetDisk">Reset</button>
+  </div>
+  <script type="module" src="main.js"></script>
+</body>
+</html>

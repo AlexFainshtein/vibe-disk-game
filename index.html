@@ -4,20 +4,22 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Vibe Disk Game</title>
-  <link rel="stylesheet" href="style.css">
+  <style>
+    html,body{height:100%;margin:0;background:#0b0b0d;color:#e6eef6;font-family:Inter,system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial;overscroll-behavior:none;overflow:hidden;touch-action:none;display:flex;align-items:center;justify-content:center}
+    .menu{display:flex;flex-direction:column;align-items:center;gap:24px}
+    .menu h1{margin:0 0 8px 0;font-size:28px;letter-spacing:0.04em;opacity:0.9}
+    .menu a{display:block;width:220px;padding:18px 0;text-align:center;text-decoration:none;font-size:18px;font-weight:600;border-radius:12px;cursor:pointer;transition:background 0.15s}
+    #btnAlex{background:#0d2233;color:#7ecfff;border:2px solid #1a4060}
+    #btnAlex:hover{background:#153248}
+    #btnEugene{background:#2a0d1a;color:#ff9ecf;border:2px solid #601a30}
+    #btnEugene:hover{background:#3d1226}
+  </style>
 </head>
 <body>
-  <canvas id="game"></canvas>
-  <div id="ui">Click the disk to stop it, drag, then release to fling.</div>
-
-  <div id="panel">
-    <button id="resetDisk">Reset</button>
+  <div class="menu">
+    <h1>Vibe Disk Game</h1>
+    <a id="btnAlex" href="alex.html" onclick="sessionStorage.setItem('fromMenu','1')">Alex</a>
+    <a id="btnEugene" href="eugene.html" onclick="sessionStorage.setItem('fromMenu','1')">Eugene</a>
   </div>
-
-  <div id="nav">
-    <button id="btnAlex" class="nav-btn active">Alex</button>
-    <button id="btnEugene" class="nav-btn">Eugene</button>
-  </div>
-  <script type="module" src="main.js"></script>
 </body>
 </html>
