@@ -1,5 +1,6 @@
 {
   "projects": {
-    "default": "vibediskgame"
+    "default": "vibediskgame",
+    "eugene": "vibediskgame1"
   }
 }

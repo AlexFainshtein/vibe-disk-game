@@ -9,4 +9,8 @@ copy input.js public\
 copy sound.js public\
 copy controls.js public\
 copy style.css public\
-firebase deploy
+if "%1"=="" (
+  firebase deploy
+) else (
+  firebase deploy --project %1
+)
