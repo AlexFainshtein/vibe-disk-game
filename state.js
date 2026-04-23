@@ -52,7 +52,9 @@ export const input = {
 export const anchor = {
   active: false,
   x: 0,
-  y: 0
+  y: 0,
+  prevX: 0,
+  prevY: 0
 };
 
 // debug: hit detection state

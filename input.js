@@ -58,6 +58,8 @@ export function setupInput(){
       anchor.active = true;
       anchor.x = clamped.x;
       anchor.y = clamped.y;
+      anchor.prevX = clamped.x;
+      anchor.prevY = clamped.y;
       playGrab();
       canvas.setPointerCapture(ev.pointerId);
     }
