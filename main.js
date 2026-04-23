@@ -1,10 +1,12 @@
 import { canvas, disk, recordDiskPosition } from './state.js';
 import { draw } from './render.js';
-
-const player = document.body.dataset.player ?? 'alex';
-const { update } = await import(`./${player}-physics.js`);
 import { setupInput } from './input.js';
 import { initControls } from './controls.js';
+import { update as alexUpdate } from './alex-physics.js';
+import { update as eugeneUpdate } from './eugene-physics.js';
+
+const player = document.body.dataset.player ?? 'alex';
+const update = player === 'eugene' ? eugeneUpdate : alexUpdate;
 
 let lastTime = performance.now();
 
