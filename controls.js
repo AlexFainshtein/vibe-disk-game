@@ -1,7 +1,9 @@
-import { canvas, disk, bar } from './state.js';
+import { canvas, disk, bar, screen } from './state.js';
 
 export function initControls(){
-  document.getElementById('resetDisk').addEventListener('click', ()=>{
+  const resetBtn = document.getElementById('resetDisk');
+  resetBtn.addEventListener('pointerdown', (e)=> e.stopPropagation());
+  resetBtn.addEventListener('click', ()=>{
     bar.y = canvas.height * 0.85;
     bar.prevY = bar.y;
     bar.vy = 0;
@@ -10,4 +12,24 @@ export function initControls(){
     disk.vx = 0;
     disk.vy = 0;
   });
+
+  const btnAlex = document.getElementById('btnAlex');
+  const btnEugene = document.getElementById('btnEugene');
+
+  if(btnAlex && btnEugene){
+    btnAlex.addEventListener('pointerdown', (e)=> e.stopPropagation());
+    btnEugene.addEventListener('pointerdown', (e)=> e.stopPropagation());
+
+    btnAlex.addEventListener('click', ()=>{
+      screen.current = 'alex';
+      btnAlex.classList.add('active');
+      btnEugene.classList.remove('active');
+    });
+
+    btnEugene.addEventListener('click', ()=>{
+      screen.current = 'eugene';
+      btnEugene.classList.add('active');
+      btnAlex.classList.remove('active');
+    });
+  }
 }

@@ -34,15 +34,15 @@ On the phone (same Wi-Fi), open `http://<PC-LAN-IP>:8000`. Editing any file and 
 
 ES modules loaded via `<script type="module" src="main.js">` — must be served over http:// (not `file://`).
 
-- [index.html](index.html) — canvas element, on-screen UI text, and a Reset button.
-- [state.js](state.js) — shared mutable state: `canvas`, `ctx`, `params` (friction, diskRadius, frameMultiplier, bounce), `disk` (x,y,vx,vy,r), `bar` (y,prevY,vy,height), `anchor` (x,y,active — spring attachment point), `diskHistory` (last 5 positions for lag-compensated hit detection), and `clickMarker`. Also owns the `resize` listener that sizes the canvas to the window.
+- [index.html](index.html) — canvas element, on-screen UI text, Reset button, and nav bar with Alex/Eugene screen-switching buttons.
+- [state.js](state.js) — shared mutable state: `screen` (current screen and background colors), `canvas`, `ctx`, `params` (friction, diskRadius, frameMultiplier, bounce), `disk` (x,y,vx,vy,r), `bar` (y,prevY,vy,height), `anchor` (x,y,active — spring attachment point), `diskHistory` (last 5 positions for lag-compensated hit detection), and `clickMarker`. Also owns the `resize` listener that sizes the canvas to the window.
 - [physics.js](physics.js) — `update(dt)` computes bar velocity from position delta, applies damped spring force toward anchor (K=40, damping=4) when active, applies friction when spring is inactive, integrates position, handles wall bounces (×`-params.bounce`), and bar collision (velocity reflection + 2× bar velocity). Triggers knock sound on bounce.
 - [sound.js](sound.js) — Web Audio API sound effects: `playKnock(intensity)` for wall/bar bounces, `playGrab()`/`playRelease()` pips for catching/losing disk or bar, `playScrape(intensity)` for disk scraping against walls (varied pips from a predefined array).
-- [render.js](render.js) — `draw()` renders gradient background, bar, disk shadow, disk, highlight, and spring line from anchor to disk center when active.
+- [render.js](render.js) — `draw()` renders screen-specific gradient background, bar, disk shadow, disk, highlight, and spring line from anchor to disk center when active.
 - [input.js](input.js) — `setupInput()` attaches pointerdown/move/up handlers. Clicking the disk (lag-compensated, checks last 5 frames) creates a spring anchor; moving the mouse moves the anchor; releasing the mouse removes the spring and the disk flies by inertia. Anchor is clamped to playable area (disk.r + 0.5 margin). Bar dragging: grab offset, clamped so disk can't be pushed above ceiling, auto-releases when pointer leaves bar.
-- [controls.js](controls.js) — `initControls()` wires the Reset button to re-center the disk, zero its velocity, and reset the bar position.
+- [controls.js](controls.js) — `initControls()` wires the Reset button and Alex/Eugene nav buttons for screen switching.
 - [main.js](main.js) — entry point: imports the modules, wires `setupInput()` + `initControls()`, records disk position history each frame, and runs the `requestAnimationFrame` loop with `dt` clamped to 33ms.
-- [style.css](style.css) — fullscreen canvas + fixed-position overlay styling for `#ui` and `#panel`. Disables pull-to-refresh and touch gestures on mobile via `overscroll-behavior` and `touch-action`.
+- [style.css](style.css) — fullscreen canvas + fixed-position overlay styling for `#ui`, `#panel`, and `#nav` (bottom nav bar). Disables pull-to-refresh and touch gestures on mobile via `overscroll-behavior` and `touch-action`.
 - [deploy.bat](deploy.bat) — copies source files into `public/` and runs `firebase deploy`.
 - [firebase.json](firebase.json) — Firebase Hosting config, serves from `public/`.
 

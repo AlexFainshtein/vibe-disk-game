@@ -1,11 +1,12 @@
-import { canvas, ctx, disk, bar, clickMarker, anchor } from './state.js';
+import { canvas, ctx, disk, bar, clickMarker, anchor, screen } from './state.js';
 
 export function draw(){
   const W = canvas.width, H = canvas.height;
   ctx.clearRect(0,0,W,H);
 
+  const bg = screen.backgrounds[screen.current];
   const g = ctx.createLinearGradient(0,0,0,H);
-  g.addColorStop(0,'#071018'); g.addColorStop(1,'#07141a');
+  g.addColorStop(0, bg.top); g.addColorStop(1, bg.bottom);
   ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
 
   // bar

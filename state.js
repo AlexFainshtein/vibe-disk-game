@@ -8,6 +8,14 @@ function resize(){
 window.addEventListener('resize', resize, {passive:true});
 resize();
 
+export const screen = {
+  current: 'alex', // 'alex' or 'eugene'
+  backgrounds: {
+    alex:   { top: '#071018', bottom: '#07141a' },
+    eugene: { top: '#180710', bottom: '#1a0714' }
+  }
+};
+
 export const params = {
   // friction is a fraction in [0,1]. It represents the proportional
   // deceleration factor applied per second (higher = stronger braking).
