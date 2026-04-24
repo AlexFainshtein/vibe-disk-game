@@ -3,15 +3,19 @@ import { playKnock } from './sound.js';
 
 const MAX_BOUNCE_SPEED = 1200;
 
-const SPRING_K        = 800;          // default: spring stiffness
-const DAMP_RADIAL     = SPRING_K/10;  // default: damping along radial direction (toward/away from finger), relative to screen
-const DAMP_TANGENTIAL = SPRING_K/10;  // default: damping along tangential direction (perpendicular to finger), relative to screen
+const SUBSTEPS        = 4;           // sub-steps per frame for spring stability
+const SPRING_K        = 800;         // default: spring stiffness
+const SPRING_K_SQ     = 4;          // default: quadratic spring stiffness (force = k_sq * dist * displacement)
+const DAMP_RADIAL     = SPRING_K/5; // default: damping along radial direction (toward/away from finger), relative to screen
+const DAMP_TANGENTIAL = SPRING_K/200; // default: damping along tangential direction (perpendicular to finger), relative to screen
 
-const ALT_SPRING_K        = 200;              // alt friction: spring stiffness
+const ALT_SPRING_K        = 50;              // alt friction: spring stiffness
+const ALT_SPRING_K_SQ     = 0.5;            // alt friction: quadratic spring stiffness
 const ALT_DAMP_RADIAL     = ALT_SPRING_K/10;  // alt friction: damping along radial direction (toward/away from finger), relative to finger
-const ALT_DAMP_TANGENTIAL = ALT_SPRING_K/10; // alt friction: damping along tangential direction (perpendicular to finger), relative to finger
+const ALT_DAMP_TANGENTIAL = ALT_SPRING_K/20; // alt friction: damping along tangential direction (perpendicular to finger), relative to finger
 
-const altFrictionEl = document.getElementById('altFriction');
+const altFrictionEl   = document.getElementById('altFriction');
+const quadSpringEl    = document.getElementById('quadSpring');
 
 export function update(dt){
   // compute bar velocity from position change
@@ -27,32 +31,35 @@ export function update(dt){
   const friction = params.friction; // 0..1 fractional braking
   const frameMultiplier = params.frameMultiplier;
 
-  // spring toward anchor
-  if(anchor.active){
-    const dx = anchor.x - disk.x;
-    const dy = anchor.y - disk.y;
-    const dist = Math.hypot(dx, dy) || 1;
-    const rx = dx / dist, ry = dy / dist;   // radial unit (toward anchor)
-    const tx = -ry,       ty = rx;           // tangential unit (perpendicular)
-    if(altFrictionEl?.dataset.on === 'true'){
-      // alt friction: decompose velocity relative to finger into radial + tangential, damp separately
-      const relVx = disk.vx - anchorVx;
-      const relVy = disk.vy - anchorVy;
-      const radialSpeed     = relVx * rx + relVy * ry;
-      const tangentialSpeed = relVx * tx + relVy * ty;
-      const dampVx = ALT_DAMP_RADIAL * radialSpeed * rx + ALT_DAMP_TANGENTIAL * tangentialSpeed * tx;
-      const dampVy = ALT_DAMP_RADIAL * radialSpeed * ry + ALT_DAMP_TANGENTIAL * tangentialSpeed * ty;
-      disk.vx += (ALT_SPRING_K * dx - dampVx) * dt;
-      disk.vy += (ALT_SPRING_K * dy - dampVy) * dt;
-    } else {
-      // default: decompose velocity relative to screen into radial + tangential, damp separately
-      const radialSpeed     = disk.vx * rx + disk.vy * ry;
-      const tangentialSpeed = disk.vx * tx + disk.vy * ty;
-      const dampVx = DAMP_RADIAL * radialSpeed * rx + DAMP_TANGENTIAL * tangentialSpeed * tx;
-      const dampVy = DAMP_RADIAL * radialSpeed * ry + DAMP_TANGENTIAL * tangentialSpeed * ty;
-      disk.vx += (SPRING_K * dx - dampVx) * dt;
-      disk.vy += (SPRING_K * dy - dampVy) * dt;
+  const subDt = dt / SUBSTEPS;
+  for(let s = 0; s < SUBSTEPS; s++){
+    // spring toward anchor
+    if(anchor.active){
+      const dx = anchor.x - disk.x;
+      const dy = anchor.y - disk.y;
+      const dist = Math.hypot(dx, dy) || 1;
+      const rx = dx / dist, ry = dy / dist;
+      const tx = -ry,       ty = rx;
+      if(altFrictionEl?.dataset.on === 'true'){
+        const relVx = disk.vx - anchorVx;
+        const relVy = disk.vy - anchorVy;
+        const radialSpeed     = relVx * rx + relVy * ry;
+        const tangentialSpeed = relVx * tx + relVy * ty;
+        const dampVx = ALT_DAMP_RADIAL * radialSpeed * rx + ALT_DAMP_TANGENTIAL * tangentialSpeed * tx;
+        const dampVy = ALT_DAMP_RADIAL * radialSpeed * ry + ALT_DAMP_TANGENTIAL * tangentialSpeed * ty;
+        disk.vx += (ALT_SPRING_K * dx - dampVx) * subDt;
+        disk.vy += (ALT_SPRING_K * dy - dampVy) * subDt;
+      } else {
+        const radialSpeed     = disk.vx * rx + disk.vy * ry;
+        const tangentialSpeed = disk.vx * tx + disk.vy * ty;
+        const dampVx = DAMP_RADIAL * radialSpeed * rx + DAMP_TANGENTIAL * tangentialSpeed * tx;
+        const dampVy = DAMP_RADIAL * radialSpeed * ry + DAMP_TANGENTIAL * tangentialSpeed * ty;
+        disk.vx += (SPRING_K * dx - dampVx) * subDt;
+        disk.vy += (SPRING_K * dy - dampVy) * subDt;
+      }
     }
+    disk.x += disk.vx * subDt;
+    disk.y += disk.vy * subDt;
   }
 
   // friction (only when spring is not active)
@@ -70,9 +77,6 @@ export function update(dt){
     disk.vx *= scale;
     disk.vy *= scale;
   }
-
-  disk.x += disk.vx * dt;
-  disk.y += disk.vy * dt;
 
   const W = canvas.width, H = canvas.height;
   let bounced = false, bounceSpeed = 0;
