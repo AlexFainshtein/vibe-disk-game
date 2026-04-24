@@ -1,18 +1,18 @@
-import { canvas, params, disk, bar, anchor } from './state.js';
+import { canvas, params, disk, bar, anchor, bricks } from './state.js';
 import { playKnock } from './sound.js';
 
 const MAX_BOUNCE_SPEED = 1200;
 
 const SUBSTEPS        = 4;           // sub-steps per frame for spring stability
 const SPRING_K        = 800;         // default: spring stiffness
-const SPRING_K_SQ     = 4;          // default: quadratic spring stiffness (force = k_sq * dist * displacement)
-const DAMP_RADIAL     = SPRING_K/5; // default: damping along radial direction (toward/away from finger), relative to screen
-const DAMP_TANGENTIAL = SPRING_K/200; // default: damping along tangential direction (perpendicular to finger), relative to screen
+const SPRING_K_SQ     = 10;          // default: quadratic spring stiffness (force = k_sq * dist * displacement)
+const DAMP_RADIAL     = SPRING_K/10; // default: damping along radial direction (toward/away from finger), relative to screen
+const DAMP_TANGENTIAL = SPRING_K/10; // default: damping along tangential direction (perpendicular to finger), relative to screen
 
-const ALT_SPRING_K        = 50;              // alt friction: spring stiffness
+const ALT_SPRING_K        = 850;              // alt friction: spring stiffness
 const ALT_SPRING_K_SQ     = 0.5;            // alt friction: quadratic spring stiffness
 const ALT_DAMP_RADIAL     = ALT_SPRING_K/10;  // alt friction: damping along radial direction (toward/away from finger), relative to finger
-const ALT_DAMP_TANGENTIAL = ALT_SPRING_K/20; // alt friction: damping along tangential direction (perpendicular to finger), relative to finger
+const ALT_DAMP_TANGENTIAL = ALT_SPRING_K/10; // alt friction: damping along tangential direction (perpendicular to finger), relative to finger
 
 const altFrictionEl   = document.getElementById('altFriction');
 const quadSpringEl    = document.getElementById('quadSpring');
@@ -94,4 +94,27 @@ export function update(dt){
     bounced = true;
   }
   if(bounced) playKnock(Math.min(bounceSpeed / MAX_BOUNCE_SPEED, 1));
+
+  // brick collisions — at most one per frame to prevent velocity double-flip
+  for(const b of bricks){
+    if(!b.alive) continue;
+    const cx = Math.max(b.x, Math.min(disk.x, b.x + b.w));
+    const cy = Math.max(b.y, Math.min(disk.y, b.y + b.h));
+    const dx = disk.x - cx, dy = disk.y - cy;
+    if(dx*dx + dy*dy >= disk.r * disk.r) continue;
+
+    b.alive = false;
+    playKnock(0.6);
+
+    const overlapX = (disk.r - Math.abs(disk.x - (b.x + b.w/2))) * Math.sign(disk.x - (b.x + b.w/2));
+    const overlapY = (disk.r - Math.abs(disk.y - (b.y + b.h/2))) * Math.sign(disk.y - (b.y + b.h/2));
+    if(Math.abs(overlapX) < Math.abs(overlapY)){
+      disk.x += overlapX;
+      disk.vx *= -params.bounce;
+    } else {
+      disk.y += overlapY;
+      disk.vy *= -params.bounce;
+    }
+    break;
+  }
 }

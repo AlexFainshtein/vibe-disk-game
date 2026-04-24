@@ -1,4 +1,4 @@
-import { canvas, ctx, disk, bar, clickMarker, anchor, screen } from './state.js';
+import { canvas, ctx, disk, bar, clickMarker, anchor, screen, bricks } from './state.js';
 
 export function draw(){
   const W = canvas.width, H = canvas.height;
@@ -8,6 +8,18 @@ export function draw(){
   const g = ctx.createLinearGradient(0,0,0,H);
   g.addColorStop(0, bg.top); g.addColorStop(1, bg.bottom);
   ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+
+  // bricks
+  for(const b of bricks){
+    if(!b.alive) continue;
+    ctx.fillStyle = b.color;
+    ctx.beginPath();
+    ctx.roundRect(b.x, b.y, b.w, b.h, 4);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
 
   // bar
   ctx.fillStyle = bar.color;

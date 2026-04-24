@@ -1,4 +1,4 @@
-import { canvas, disk, bar, screen } from './state.js';
+import { canvas, disk, bar, screen, initBricks } from './state.js';
 
 export function initControls(){
   const altFriction = document.getElementById('altFriction');
@@ -42,6 +42,7 @@ export function initControls(){
     disk.y = (bar.y - disk.r) / 2;
     disk.vx = 0;
     disk.vy = 0;
+    initBricks();
   });
 
   const btnAlex = document.getElementById('btnAlex');
