@@ -30,7 +30,8 @@ export const disk = {
   r: params.diskRadius,
   vx: 0,
   vy: 0,
-  color: '#ffb86b'
+  color: '#ffb86b',
+  glass: false
 };
 
 const BAR_HEIGHT = 16;

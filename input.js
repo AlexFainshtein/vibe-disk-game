@@ -66,6 +66,7 @@ export function setupInput(){
       anchor.y = clamped.y;
       anchor.prevX = clamped.x;
       anchor.prevY = clamped.y;
+      disk.glass = false;
       playGrab();
       canvas.setPointerCapture(ev.pointerId);
     } else if(document.body.dataset.player === 'eugene'){

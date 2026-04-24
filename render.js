@@ -53,13 +53,30 @@ export function draw(){
 
   // disk
   ctx.beginPath();
-  ctx.fillStyle = disk.color;
-  ctx.arc(disk.x,disk.y,disk.r,0,Math.PI*2);
-  ctx.fill();
+  ctx.arc(disk.x, disk.y, disk.r, 0, Math.PI*2);
+  if(disk.glass){
+    // Soap bubble: near-invisible body with iridescent rim
+    ctx.fillStyle = 'rgba(210,235,255,0.07)';
+    ctx.fill();
+    // iridescent rim — linear gradient approximating rainbow sheen
+    const rimGrad = ctx.createLinearGradient(
+      disk.x - disk.r, disk.y - disk.r,
+      disk.x + disk.r, disk.y + disk.r);
+    rimGrad.addColorStop(0,    'rgba(255,120,220,0.85)');
+    rimGrad.addColorStop(0.33, 'rgba(100,210,255,0.85)');
+    rimGrad.addColorStop(0.66, 'rgba(180,255,120,0.85)');
+    rimGrad.addColorStop(1,    'rgba(255,120,220,0.85)');
+    ctx.strokeStyle = rimGrad;
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+  } else {
+    ctx.fillStyle = disk.color;
+    ctx.fill();
+  }
 
   // highlight
   ctx.beginPath();
-  ctx.fillStyle = 'rgba(255,255,255,0.14)';
+  ctx.fillStyle = disk.glass ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.14)';
   ctx.ellipse(disk.x - disk.r*0.25, disk.y - disk.r*0.35, disk.r*0.45, disk.r*0.25, -0.5, 0, Math.PI*2);
   ctx.fill();
 

@@ -86,6 +86,54 @@ export function playFanfare(){
   });
 }
 
+export function playDing(){
+  const ac = getCtx();
+  if(ac.state === 'suspended') ac.resume();
+  // Same pop as playShatter but one octave lower (highpass at 1400 Hz instead of 2800)
+  const duration = 0.55;
+  const bufSize = Math.ceil(ac.sampleRate * duration);
+  const buffer = ac.createBuffer(1, bufSize, ac.sampleRate);
+  const data = buffer.getChannelData(0);
+  for(let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
+  const source = ac.createBufferSource();
+  source.buffer = buffer;
+  const filter = ac.createBiquadFilter();
+  filter.type = 'highpass';
+  filter.frequency.value = 2800;
+  const gain = ac.createGain();
+  gain.gain.setValueAtTime(0.55, ac.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + duration);
+  source.connect(filter);
+  filter.connect(gain);
+  gain.connect(ac.destination);
+  source.start(ac.currentTime);
+  source.stop(ac.currentTime + duration + 0.02);
+}
+
+export function playShatter(){
+  const ac = getCtx();
+  if(ac.state === 'suspended') ac.resume();
+  // White noise burst through a highpass filter — actual glass-break character
+  const duration = 0.55;
+  const bufSize = Math.ceil(ac.sampleRate * duration);
+  const buffer = ac.createBuffer(1, bufSize, ac.sampleRate);
+  const data = buffer.getChannelData(0);
+  for(let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
+  const source = ac.createBufferSource();
+  source.buffer = buffer;
+  const filter = ac.createBiquadFilter();
+  filter.type = 'highpass';
+  filter.frequency.value = 700;
+  const gain = ac.createGain();
+  gain.gain.setValueAtTime(0.55, ac.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + duration);
+  source.connect(filter);
+  filter.connect(gain);
+  gain.connect(ac.destination);
+  source.start(ac.currentTime);
+  source.stop(ac.currentTime + duration + 0.02);
+}
+
 const scrapePips = [
   { freq: 180, type: 'square' },
   { freq: 220, type: 'sawtooth' },

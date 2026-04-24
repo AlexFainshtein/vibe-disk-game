@@ -1,5 +1,5 @@
 import { canvas, params, disk, bar, anchor, bricks, mallet, initBricks } from './state.js';
-import { playKnock, playFanfare } from './sound.js';
+import { playKnock, playFanfare, playDing, playShatter } from './sound.js';
 
 const MAX_BOUNCE_SPEED = 1200;
 const MALLET_RESTITUTION = 0.5; // <1 absorbs energy on mallet hits
@@ -77,7 +77,8 @@ export function update(dt){
 
   const subDt = dt / SUBSTEPS;
   const quadratic = quadSpringEl?.dataset.on === 'true';
-  for(let s = 0; s < SUBSTEPS; s++){
+  let shattered = false;
+  for(let s = 0; s < SUBSTEPS && !shattered; s++){
     // spring toward anchor
     if(anchor.active){
       const dx = anchor.x - disk.x;
@@ -124,34 +125,50 @@ export function update(dt){
         const cy = Math.max(b.y, Math.min(disk.y, b.y + b.h));
         const ddx = disk.x - cx, ddy = disk.y - cy;
         if(ddx*ddx + ddy*ddy >= disk.r * disk.r) continue;
-        b.alive = false;
-        playKnock(0.6);
-        if(bricks.every(b => !b.alive)){
-          playFanfare();
-          setTimeout(() => {
-            initBricks();
-            disk.x = canvas.width / 2;
-            disk.y = canvas.height / 2;
-            disk.vx = 0;
-            disk.vy = 0;
-            mallet.active = false;
-            anchor.active = false;
-          }, 600);
+        if(disk.glass){
+          // glass disk shatters instead of breaking the brick
+          playShatter();
+          disk.glass = false;
+          disk.x = canvas.width / 2;
+          disk.y = canvas.height / 2;
+          disk.vx = 0;
+          disk.vy = 0;
+          mallet.active = false;
+          anchor.active = false;
+          shattered = true;
+        } else {
+          b.alive = false;
+          playKnock(0.6);
+          if(bricks.every(b => !b.alive)){
+            playFanfare();
+            setTimeout(() => {
+              initBricks();
+              disk.x = canvas.width / 2;
+              disk.y = canvas.height / 2;
+              disk.vx = 0;
+              disk.vy = 0;
+              disk.glass = false;
+              mallet.active = false;
+              anchor.active = false;
+            }, 600);
+          }
+          // push-out and reflection using closest point (correct for all disk/brick size ratios)
+          const enx = disk.x - cx, eny = disk.y - cy;
+          const len = Math.hypot(enx, eny) || 1;
+          const nnx = enx / len, nny = eny / len;
+          disk.x += nnx * (disk.r - len);
+          disk.y += nny * (disk.r - len);
+          const dot = disk.vx * nnx + disk.vy * nny;
+          disk.vx -= (1 + params.bounce) * dot * nnx;
+          disk.vy -= (1 + params.bounce) * dot * nny;
         }
-        // push-out and reflection using closest point (correct for all disk/brick size ratios)
-        const enx = disk.x - cx, eny = disk.y - cy;
-        const len = Math.hypot(enx, eny) || 1;
-        const nnx = enx / len, nny = eny / len;
-        disk.x += nnx * (disk.r - len);
-        disk.y += nny * (disk.r - len);
-        const dot = disk.vx * nnx + disk.vy * nny;
-        disk.vx -= (1 + params.bounce) * dot * nnx;
-        disk.vy -= (1 + params.bounce) * dot * nny;
         break;
       }
       // continue with remaining time — next substep handles any further bricks
-      disk.x += disk.vx * (subDt - hi);
-      disk.y += disk.vy * (subDt - hi);
+      if(!shattered){
+        disk.x += disk.vx * (subDt - hi);
+        disk.y += disk.vy * (subDt - hi);
+      }
     }
   }
 
@@ -177,12 +194,15 @@ export function update(dt){
   if(disk.x + disk.r > W){ disk.x = W - disk.r; bounceSpeed = Math.max(bounceSpeed, Math.abs(disk.vx)); disk.vx *= -params.bounce; bounced = true; }
   if(disk.y - disk.r < 0){ disk.y = disk.r; bounceSpeed = Math.max(bounceSpeed, Math.abs(disk.vy)); disk.vy *= -params.bounce; bounced = true; }
   // bar collision: disk bounces off bar top with relative velocity
+  let hitBar = false;
   if(disk.y + disk.r > bar.y){
     disk.y = bar.y - disk.r;
     bounceSpeed = Math.max(bounceSpeed, Math.abs(disk.vy));
     disk.vy = -Math.abs(disk.vy) * params.bounce + 2 * bar.vy;
     bounced = true;
+    hitBar = true;
   }
   if(bounced) playKnock(Math.min(bounceSpeed / MAX_BOUNCE_SPEED, 1));
+  if(hitBar && !disk.glass){ disk.glass = true; playDing(); }
   resolveMalletCollision(dt);
 }
