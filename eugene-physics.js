@@ -1,4 +1,4 @@
-import { canvas, params, disk, bar, anchor, bricks } from './state.js';
+import { canvas, params, disk, bar, anchor, bricks, ghostDisk } from './state.js';
 import { playKnock } from './sound.js';
 
 const MAX_BOUNCE_SPEED = 1200;
@@ -16,6 +16,29 @@ const ALT_DAMP_TANGENTIAL = ALT_SPRING_K/10; // alt friction: damping along tang
 
 const altFrictionEl   = document.getElementById('altFriction');
 const quadSpringEl    = document.getElementById('quadSpring');
+
+function resolveGhostCollision(dt){
+  if(!ghostDisk.active) return;
+  ghostDisk.life -= dt;
+  if(ghostDisk.life <= 0){ ghostDisk.active = false; return; }
+
+  const dx = disk.x - ghostDisk.x;
+  const dy = disk.y - ghostDisk.y;
+  const dist = Math.hypot(dx, dy);
+  const minDist = disk.r * 2;
+  if(dist >= minDist || dist < 1e-6) return;
+
+  const nx = dx / dist, ny = dy / dist;
+  disk.x = ghostDisk.x + nx * minDist;
+  disk.y = ghostDisk.y + ny * minDist;
+
+  const relVn = (disk.vx - ghostDisk.vx) * nx + (disk.vy - ghostDisk.vy) * ny;
+  if(relVn >= 0) return;
+
+  disk.vx -= (1 + params.bounce) * relVn * nx;
+  disk.vy -= (1 + params.bounce) * relVn * ny;
+  playKnock(Math.min(Math.abs(relVn) / 1200, 1));
+}
 
 function anyBrickHit(x, y, r, bricks){
   const r2 = r * r;
@@ -140,5 +163,5 @@ export function update(dt){
     bounced = true;
   }
   if(bounced) playKnock(Math.min(bounceSpeed / MAX_BOUNCE_SPEED, 1));
-
+  resolveGhostCollision(dt);
 }

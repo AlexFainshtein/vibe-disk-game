@@ -1,4 +1,4 @@
-import { canvas, ctx, disk, bar, clickMarker, anchor, screen, bricks } from './state.js';
+import { canvas, ctx, disk, bar, clickMarker, anchor, screen, bricks, ghostDisk, GHOST_LIFE } from './state.js';
 
 export function draw(){
   const W = canvas.width, H = canvas.height;
@@ -24,6 +24,18 @@ export function draw(){
   // bar
   ctx.fillStyle = bar.color;
   ctx.fillRect(0, bar.y, W, bar.height);
+
+  // ghost disk (Eugene's variant only)
+  if(ghostDisk.active && screen.current === 'eugene'){
+    const alpha = ghostDisk.life / GHOST_LIFE;
+    ctx.beginPath();
+    ctx.arc(ghostDisk.x, ghostDisk.y, disk.r, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(255,255,255,${alpha})`;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = `rgba(255,255,255,${alpha * 0.15})`;
+    ctx.fill();
+  }
 
   // shadow
   ctx.beginPath();

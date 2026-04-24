@@ -19,7 +19,7 @@ export const params = {
   // friction is a fraction in [0,1]. It represents the proportional
   // deceleration factor applied per second (higher = stronger braking).
   friction: 0,
-  diskRadius: 60,
+  diskRadius: 40,
   frameMultiplier: 1,
   bounce: 1
 };
@@ -98,6 +98,15 @@ export function initBricks(){
     }
   }
 }
+
+// ghost disk: spawned on a tap-miss, deflects the main disk on contact
+export const ghostDisk = {
+  active: false,
+  x: 0, y: 0,
+  vx: 0, vy: 0,
+  life: 0  // seconds remaining (counts down to 0)
+};
+export const GHOST_LIFE = 0.6; // seconds the ghost disk lives
 
 // recent disk positions for lag-compensated hit detection
 const HISTORY_SIZE = 5;

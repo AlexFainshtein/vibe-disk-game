@@ -1,4 +1,4 @@
-import { canvas, disk, bar, clickMarker, diskHistory, anchor } from './state.js';
+import { canvas, disk, bar, clickMarker, diskHistory, anchor, ghostDisk, GHOST_LIFE } from './state.js';
 import { playGrab, playRelease } from './sound.js';
 
 function eventPos(e){
@@ -20,6 +20,7 @@ function clampAnchor(x, y){
 
 export function setupInput(){
   let barGrabOffset = 0;
+  let prevPointer = null; // {x, y, t} — used to estimate tap velocity for ghost disk
 
   // Prevent double-tap-and-hold text-selection loupe on iOS (canvas only, so buttons still work)
   let lastTouchEnd = 0;
@@ -67,11 +68,30 @@ export function setupInput(){
       anchor.prevY = clamped.y;
       playGrab();
       canvas.setPointerCapture(ev.pointerId);
+    } else if(document.body.dataset.player === 'eugene'){
+      // Spawn a ghost disk at the tap position (Eugene's variant only).
+      // Velocity is estimated from pointer movement leading into the tap.
+      let gvx = 0, gvy = 0;
+      if(prevPointer){
+        const dt = (p.t - prevPointer.t) / 1000;
+        if(dt > 0 && dt < 0.2){
+          gvx = (p.x - prevPointer.x) / dt;
+          gvy = (p.y - prevPointer.y) / dt;
+        }
+      }
+      ghostDisk.active = true;
+      ghostDisk.x = p.x;
+      ghostDisk.y = p.y;
+      ghostDisk.vx = gvx;
+      ghostDisk.vy = gvy;
+      ghostDisk.life = GHOST_LIFE;
     }
+    prevPointer = p;
   });
 
   canvas.addEventListener('pointermove', (ev)=>{
     const p = eventPos(ev);
+    prevPointer = p;
     if(bar.dragging){
       const minBarY = disk.r * 2;
       let newBarY = p.y + barGrabOffset;
