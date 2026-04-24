@@ -29,12 +29,16 @@ export function draw(){
   if(mallet.active && screen.current === 'eugene'){
     ctx.beginPath();
     ctx.arc(mallet.x, mallet.y, disk.r, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.fillStyle = 'rgba(200,200,200,0.75)';
     ctx.fill();
+    // thick inset outline — drawn at reduced radius so stroke stays inside
+    const strokeW = 10;
+    ctx.beginPath();
+    ctx.arc(mallet.x, mallet.y, disk.r - strokeW / 2, 0, Math.PI * 2);
     ctx.strokeStyle = 'rgba(255,255,255,0.85)';
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = strokeW;
     ctx.stroke();
-    // small center dot, like a real mallet handle
+    // center dot
     ctx.beginPath();
     ctx.arc(mallet.x, mallet.y, 5, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(255,255,255,0.7)';

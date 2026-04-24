@@ -2,6 +2,7 @@ import { canvas, params, disk, bar, anchor, bricks, mallet } from './state.js';
 import { playKnock } from './sound.js';
 
 const MAX_BOUNCE_SPEED = 1200;
+const MALLET_RESTITUTION = 0.5; // <1 absorbs energy on mallet hits
 
 const SUBSTEPS        = 4;           // sub-steps per frame for spring stability
 const SPRING_K        = 800;         // default: spring stiffness
@@ -43,8 +44,8 @@ function resolveMalletCollision(dt){
   const relVn = (disk.vx - mallet.vx) * nx + (disk.vy - mallet.vy) * ny;
   if(relVn >= 0) return; // already separating
 
-  disk.vx -= (1 + params.bounce) * relVn * nx;
-  disk.vy -= (1 + params.bounce) * relVn * ny;
+  disk.vx -= (1 + MALLET_RESTITUTION) * relVn * nx;
+  disk.vy -= (1 + MALLET_RESTITUTION) * relVn * ny;
   playKnock(Math.min(Math.abs(relVn) / 1200, 1));
 }
 
