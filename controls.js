@@ -26,7 +26,7 @@ export function initControls(){
   const resetBtn = document.getElementById('resetDisk');
   resetBtn.addEventListener('pointerdown', (e)=> e.stopPropagation());
   resetBtn.addEventListener('click', ()=>{
-    bar.y = canvas.height * 0.85;
+    bar.y = document.body.dataset.player === 'eugene' ? canvas.height - bar.height : canvas.height * 0.85;
     bar.prevY = bar.y;
     bar.vy = 0;
     disk.x = canvas.width / 2;

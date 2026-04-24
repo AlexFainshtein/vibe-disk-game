@@ -1,12 +1,11 @@
 export const canvas = document.getElementById('game');
 export const ctx = canvas.getContext('2d');
 
-function resize(){
+function resizeCanvas(){
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
 }
-window.addEventListener('resize', resize, {passive:true});
-resize();
+resizeCanvas();
 
 export const screen = {
   current: document.body.dataset.player ?? 'alex',
@@ -34,14 +33,27 @@ export const disk = {
   color: '#ffb86b'
 };
 
+const BAR_HEIGHT = 16;
+const initialBarY = document.body.dataset.player === 'eugene'
+  ? canvas.height - BAR_HEIGHT
+  : canvas.height * 0.85;
+
 export const bar = {
-  y: canvas.height * 0.85,
-  prevY: canvas.height * 0.85,
+  y: initialBarY,
+  prevY: initialBarY,
   vy: 0,
-  height: 16,
+  height: BAR_HEIGHT,
   color: '#88aacc',
   dragging: false
 };
+
+window.addEventListener('resize', ()=>{
+  resizeCanvas();
+  if(document.body.dataset.player === 'eugene'){
+    bar.y = canvas.height - bar.height;
+    bar.prevY = bar.y;
+  }
+}, {passive:true});
 
 export const input = {
   dragging: false,
