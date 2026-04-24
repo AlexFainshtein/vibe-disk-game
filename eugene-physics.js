@@ -1,4 +1,4 @@
-import { canvas, params, disk, bar, anchor, bricks, mallet, initBricks } from './state.js';
+import { canvas, params, disk, bar, anchor, bricks, mallet, initBricks, bubblePop } from './state.js';
 import { playKnock, playFanfare, playDing, playShatter } from './sound.js';
 
 const MAX_BOUNCE_SPEED = 1200;
@@ -126,8 +126,18 @@ export function update(dt){
         const ddx = disk.x - cx, ddy = disk.y - cy;
         if(ddx*ddx + ddy*ddy >= disk.r * disk.r) continue;
         if(disk.glass){
-          // glass disk shatters instead of breaking the brick
+          // bubble pops instead of breaking the brick
           playShatter();
+          // spawn pop animation at the collision point
+          bubblePop.active = true;
+          bubblePop.x = disk.x;
+          bubblePop.y = disk.y;
+          bubblePop.t = 0;
+          bubblePop.particles = Array.from({length: 9}, (_, i) => {
+            const angle = (i / 9) * Math.PI * 2 + (Math.random() - 0.5) * 0.4;
+            const speed = 0.7 + Math.random() * 0.6;
+            return { ax: Math.cos(angle) * speed, ay: Math.sin(angle) * speed };
+          });
           disk.glass = false;
           disk.x = canvas.width / 2;
           disk.y = canvas.height / 2;
@@ -205,4 +215,9 @@ export function update(dt){
   if(bounced) playKnock(Math.min(bounceSpeed / MAX_BOUNCE_SPEED, 1));
   if(hitBar && !disk.glass){ disk.glass = true; playDing(); }
   resolveMalletCollision(dt);
+
+  if(bubblePop.active){
+    bubblePop.t += dt;
+    if(bubblePop.t >= bubblePop.duration) bubblePop.active = false;
+  }
 }

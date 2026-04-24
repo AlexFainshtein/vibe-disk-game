@@ -1,4 +1,4 @@
-import { canvas, ctx, disk, bar, clickMarker, anchor, screen, bricks, mallet } from './state.js';
+import { canvas, ctx, disk, bar, clickMarker, anchor, screen, bricks, mallet, bubblePop } from './state.js';
 
 export function draw(){
   const W = canvas.width, H = canvas.height;
@@ -43,6 +43,36 @@ export function draw(){
     ctx.arc(mallet.x, mallet.y, 5, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(255,255,255,0.7)';
     ctx.fill();
+  }
+
+  // bubble pop animation
+  if(bubblePop.active){
+    const p = bubblePop.t / bubblePop.duration; // 0→1
+    const alpha = 1 - p;
+    const r = disk.r * (1 + p * 1.8);
+    // expanding iridescent ring
+    ctx.beginPath();
+    ctx.arc(bubblePop.x, bubblePop.y, r, 0, Math.PI * 2);
+    const rimGrad = ctx.createLinearGradient(
+      bubblePop.x - r, bubblePop.y - r,
+      bubblePop.x + r, bubblePop.y + r);
+    rimGrad.addColorStop(0,    `rgba(255,120,220,${alpha * 0.9})`);
+    rimGrad.addColorStop(0.33, `rgba(100,210,255,${alpha * 0.9})`);
+    rimGrad.addColorStop(0.66, `rgba(180,255,120,${alpha * 0.9})`);
+    rimGrad.addColorStop(1,    `rgba(255,120,220,${alpha * 0.9})`);
+    ctx.strokeStyle = rimGrad;
+    ctx.lineWidth = Math.max(0.5, 3 * (1 - p));
+    ctx.stroke();
+    // droplets flying outward
+    const maxDist = disk.r * 2.2 * p;
+    for(const part of bubblePop.particles){
+      const px = bubblePop.x + part.ax * maxDist;
+      const py = bubblePop.y + part.ay * maxDist;
+      ctx.beginPath();
+      ctx.arc(px, py, Math.max(0.5, 3.5 * (1 - p)), 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(180,230,255,${alpha * 0.85})`;
+      ctx.fill();
+    }
   }
 
   // shadow

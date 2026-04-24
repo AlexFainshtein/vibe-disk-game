@@ -100,6 +100,15 @@ export function initBricks(){
   }
 }
 
+// bubble pop animation state
+export const bubblePop = {
+  active: false,
+  x: 0, y: 0,
+  t: 0,
+  duration: 0.45,
+  particles: [] // [{ax, ay}] unit-ish direction vectors
+};
+
 // air-hockey mallet: appears on a tap-miss, follows the finger, deflects the disk
 export const mallet = {
   active: false,
