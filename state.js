@@ -84,10 +84,10 @@ export function initBricks(){
   const gap = 5;
   const brickW = (canvas.width - gap * (cols + 1)) / cols;
   const brickH = 20;
-  const startY = 95;
+  const startY = 120;
   const rowColors = ['#7a1a3a','#6b1a45','#5c1a50','#4d1a5b'];
   for(let r = 0; r < rows; r++){
-    for(let c = 0; c < cols; c++){
+    for(let c = 2; c < cols; c++){
       bricks.push({
         x: gap + c * (brickW + gap),
         y: startY + r * (brickH + gap),
