@@ -31,8 +31,35 @@ export function update(dt){
   const friction = params.friction; // 0..1 fractional braking
   const frameMultiplier = params.frameMultiplier;
 
-  const subDt = dt / SUBSTEPS;
-  for(let s = 0; s < SUBSTEPS; s++){
+  // compute brick bounding box and minimum brick dimension for tunneling prevention
+  let brickMinX = Infinity, brickMinY = Infinity, brickMaxX = -Infinity, brickMaxY = -Infinity;
+  let minBrickDim = Infinity;
+  for(const b of bricks){
+    if(!b.alive) continue;
+    if(b.x           < brickMinX) brickMinX = b.x;
+    if(b.y           < brickMinY) brickMinY = b.y;
+    if(b.x + b.w     > brickMaxX) brickMaxX = b.x + b.w;
+    if(b.y + b.h     > brickMaxY) brickMaxY = b.y + b.h;
+    const dim = Math.min(b.w, b.h);
+    if(dim < minBrickDim) minBrickDim = dim;
+  }
+
+  // adaptive substeps: increase when disk is near bricks so it can't tunnel
+  let substeps = SUBSTEPS;
+  const hasBricks = brickMaxY > -Infinity;
+  if(hasBricks){
+    const nearX = disk.x + disk.r > brickMinX && disk.x - disk.r < brickMaxX;
+    const nearY = disk.y - disk.r < brickMaxY + disk.r && disk.y + disk.r > brickMinY - disk.r;
+    if(nearX && nearY){
+      const speed = Math.hypot(disk.vx, disk.vy);
+      const needed = Math.ceil(2 * speed * dt / minBrickDim);
+      if(needed > substeps) substeps = needed;
+    }
+  }
+
+  const subDt = dt / substeps;
+  const quadratic = quadSpringEl?.dataset.on === 'true';
+  for(let s = 0; s < substeps; s++){
     // spring toward anchor
     if(anchor.active){
       const dx = anchor.x - disk.x;
@@ -40,7 +67,6 @@ export function update(dt){
       const dist = Math.hypot(dx, dy) || 1;
       const rx = dx / dist, ry = dy / dist;
       const tx = -ry,       ty = rx;
-      const quadratic = quadSpringEl?.dataset.on === 'true';
       if(altFrictionEl?.dataset.on === 'true'){
         const relVx = disk.vx - anchorVx;
         const relVy = disk.vy - anchorVy;
@@ -63,6 +89,31 @@ export function update(dt){
     }
     disk.x += disk.vx * subDt;
     disk.y += disk.vy * subDt;
+
+    // brick collision: destroy all intersecting bricks, deflect once from deepest hit
+    let bestPen = 0, bestOX = 0, bestOY = 0;
+    for(const b of bricks){
+      if(!b.alive) continue;
+      const cx = Math.max(b.x, Math.min(disk.x, b.x + b.w));
+      const cy = Math.max(b.y, Math.min(disk.y, b.y + b.h));
+      const ddx = disk.x - cx, ddy = disk.y - cy;
+      if(ddx*ddx + ddy*ddy >= disk.r * disk.r) continue;
+      b.alive = false;
+      playKnock(0.6);
+      const oX = (disk.r - Math.abs(disk.x - (b.x + b.w/2))) * Math.sign(disk.x - (b.x + b.w/2));
+      const oY = (disk.r - Math.abs(disk.y - (b.y + b.h/2))) * Math.sign(disk.y - (b.y + b.h/2));
+      const pen = Math.min(Math.abs(oX), Math.abs(oY));
+      if(pen > bestPen){ bestPen = pen; bestOX = oX; bestOY = oY; }
+    }
+    if(bestPen > 0){
+      if(Math.abs(bestOX) < Math.abs(bestOY)){
+        disk.x += bestOX;
+        disk.vx *= -params.bounce;
+      } else {
+        disk.y += bestOY;
+        disk.vy *= -params.bounce;
+      }
+    }
   }
 
   // friction (only when spring is not active)
@@ -95,26 +146,4 @@ export function update(dt){
   }
   if(bounced) playKnock(Math.min(bounceSpeed / MAX_BOUNCE_SPEED, 1));
 
-  // brick collisions — at most one per frame to prevent velocity double-flip
-  for(const b of bricks){
-    if(!b.alive) continue;
-    const cx = Math.max(b.x, Math.min(disk.x, b.x + b.w));
-    const cy = Math.max(b.y, Math.min(disk.y, b.y + b.h));
-    const dx = disk.x - cx, dy = disk.y - cy;
-    if(dx*dx + dy*dy >= disk.r * disk.r) continue;
-
-    b.alive = false;
-    playKnock(0.6);
-
-    const overlapX = (disk.r - Math.abs(disk.x - (b.x + b.w/2))) * Math.sign(disk.x - (b.x + b.w/2));
-    const overlapY = (disk.r - Math.abs(disk.y - (b.y + b.h/2))) * Math.sign(disk.y - (b.y + b.h/2));
-    if(Math.abs(overlapX) < Math.abs(overlapY)){
-      disk.x += overlapX;
-      disk.vx *= -params.bounce;
-    } else {
-      disk.y += overlapY;
-      disk.vy *= -params.bounce;
-    }
-    break;
-  }
 }
