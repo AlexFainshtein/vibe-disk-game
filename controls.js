@@ -10,6 +10,19 @@ export function initControls(){
     });
   }
 
+  const fullscreenBtn = document.getElementById('fullscreenBtn');
+  if(fullscreenBtn){
+    fullscreenBtn.addEventListener('pointerdown', (e)=> e.stopPropagation());
+    fullscreenBtn.addEventListener('click', ()=>{
+      if(document.fullscreenElement || document.webkitFullscreenElement){
+        (document.exitFullscreen ?? document.webkitExitFullscreen)?.call(document);
+      } else {
+        const el = document.documentElement;
+        (el.requestFullscreen ?? el.webkitRequestFullscreen)?.call(el);
+      }
+    });
+  }
+
   const resetBtn = document.getElementById('resetDisk');
   resetBtn.addEventListener('pointerdown', (e)=> e.stopPropagation());
   resetBtn.addEventListener('click', ()=>{

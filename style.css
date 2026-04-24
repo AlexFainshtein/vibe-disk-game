@@ -5,8 +5,8 @@ canvas{display:block;width:100%;height:100%;touch-action:none}
 
 #panel{position:fixed;right:12px;top:12px;width:240px;background:rgba(0,0,0,0.5);padding:12px;border-radius:10px;font-size:13px;color:#e6eef6}
 #panel .row{display:block;margin:6px 0}
-#panel #resetDisk{background:#14323a;color:#e6eef6;padding:6px 8px;border-radius:6px;cursor:pointer;display:inline-block}
-#panel #resetDisk:hover{background:#1b4a4f}
+#panel #resetDisk,#panel #fullscreenBtn{background:#14323a;color:#e6eef6;padding:6px 8px;border-radius:6px;cursor:pointer;display:inline-block;margin:3px 0}
+#panel #resetDisk:hover,#panel #fullscreenBtn:hover{background:#1b4a4f}
 #panel #altFriction{cursor:pointer}
 #panel #altFriction[data-on="false"]{opacity:0.45}
 
