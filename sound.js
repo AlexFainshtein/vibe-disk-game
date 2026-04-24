@@ -63,6 +63,29 @@ export function playRelease(){
   osc.stop(ac.currentTime + 0.11);
 }
 
+export function playFanfare(){
+  const ac = getCtx();
+  if(ac.state === 'suspended') ac.resume();
+  // Rising major arpeggio: C5 E5 G5 C6
+  const notes = [523.25, 659.25, 783.99, 1046.50];
+  const noteDur = 0.12;
+  const gap = 0.10;
+  notes.forEach((freq, i) => {
+    const t = ac.currentTime + i * gap;
+    const osc = ac.createOscillator();
+    const gain = ac.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, t);
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.3, t + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + noteDur);
+    osc.connect(gain);
+    gain.connect(ac.destination);
+    osc.start(t);
+    osc.stop(t + noteDur + 0.02);
+  });
+}
+
 const scrapePips = [
   { freq: 180, type: 'square' },
   { freq: 220, type: 'sawtooth' },

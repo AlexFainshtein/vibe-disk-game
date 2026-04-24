@@ -1,5 +1,5 @@
-import { canvas, params, disk, bar, anchor, bricks, mallet } from './state.js';
-import { playKnock } from './sound.js';
+import { canvas, params, disk, bar, anchor, bricks, mallet, initBricks } from './state.js';
+import { playKnock, playFanfare } from './sound.js';
 
 const MAX_BOUNCE_SPEED = 1200;
 const MALLET_RESTITUTION = 0.5; // <1 absorbs energy on mallet hits
@@ -126,6 +126,18 @@ export function update(dt){
         if(ddx*ddx + ddy*ddy >= disk.r * disk.r) continue;
         b.alive = false;
         playKnock(0.6);
+        if(bricks.every(b => !b.alive)){
+          playFanfare();
+          setTimeout(() => {
+            initBricks();
+            disk.x = canvas.width / 2;
+            disk.y = canvas.height / 2;
+            disk.vx = 0;
+            disk.vy = 0;
+            mallet.active = false;
+            anchor.active = false;
+          }, 600);
+        }
         // push-out and reflection using closest point (correct for all disk/brick size ratios)
         const enx = disk.x - cx, eny = disk.y - cy;
         const len = Math.hypot(enx, eny) || 1;
