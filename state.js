@@ -99,14 +99,13 @@ export function initBricks(){
   }
 }
 
-// ghost disk: spawned on a tap-miss, deflects the main disk on contact
-export const ghostDisk = {
+// air-hockey mallet: appears on a tap-miss, follows the finger, deflects the disk
+export const mallet = {
   active: false,
   x: 0, y: 0,
-  vx: 0, vy: 0,
-  life: 0  // seconds remaining (counts down to 0)
+  prevX: 0, prevY: 0,
+  vx: 0, vy: 0
 };
-export const GHOST_LIFE = 0.6; // seconds the ghost disk lives
 
 // recent disk positions for lag-compensated hit detection
 const HISTORY_SIZE = 5;

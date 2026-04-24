@@ -1,4 +1,4 @@
-import { canvas, disk, bar, clickMarker, diskHistory, anchor, ghostDisk, GHOST_LIFE } from './state.js';
+import { canvas, disk, bar, clickMarker, diskHistory, anchor, mallet } from './state.js';
 import { playGrab, playRelease } from './sound.js';
 
 function eventPos(e){
@@ -69,22 +69,15 @@ export function setupInput(){
       playGrab();
       canvas.setPointerCapture(ev.pointerId);
     } else if(document.body.dataset.player === 'eugene'){
-      // Spawn a ghost disk at the tap position (Eugene's variant only).
-      // Velocity is estimated from pointer movement leading into the tap.
-      let gvx = 0, gvy = 0;
-      if(prevPointer){
-        const dt = (p.t - prevPointer.t) / 1000;
-        if(dt > 0 && dt < 0.2){
-          gvx = (p.x - prevPointer.x) / dt;
-          gvy = (p.y - prevPointer.y) / dt;
-        }
-      }
-      ghostDisk.active = true;
-      ghostDisk.x = p.x;
-      ghostDisk.y = p.y;
-      ghostDisk.vx = gvx;
-      ghostDisk.vy = gvy;
-      ghostDisk.life = GHOST_LIFE;
+      // Spawn the air-hockey mallet at the tap position (Eugene's variant only).
+      mallet.active = true;
+      mallet.x = p.x;
+      mallet.y = p.y;
+      mallet.prevX = p.x;
+      mallet.prevY = p.y;
+      mallet.vx = 0;
+      mallet.vy = 0;
+      canvas.setPointerCapture(ev.pointerId);
     }
     prevPointer = p;
   });
@@ -92,6 +85,12 @@ export function setupInput(){
   canvas.addEventListener('pointermove', (ev)=>{
     const p = eventPos(ev);
     prevPointer = p;
+    if(mallet.active){
+      mallet.prevX = mallet.x;
+      mallet.prevY = mallet.y;
+      mallet.x = p.x;
+      mallet.y = p.y;
+    }
     if(bar.dragging){
       const minBarY = disk.r * 2;
       let newBarY = p.y + barGrabOffset;
@@ -122,6 +121,11 @@ export function setupInput(){
       anchor.active = false;
       clickMarker.active = false;
       playRelease();
+      try{ canvas.releasePointerCapture(ev.pointerId); }catch(e){}
+      return;
+    }
+    if(mallet.active){
+      mallet.active = false;
       try{ canvas.releasePointerCapture(ev.pointerId); }catch(e){}
     }
   });

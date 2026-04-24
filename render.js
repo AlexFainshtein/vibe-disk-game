@@ -1,4 +1,4 @@
-import { canvas, ctx, disk, bar, clickMarker, anchor, screen, bricks, ghostDisk, GHOST_LIFE } from './state.js';
+import { canvas, ctx, disk, bar, clickMarker, anchor, screen, bricks, mallet } from './state.js';
 
 export function draw(){
   const W = canvas.width, H = canvas.height;
@@ -25,15 +25,19 @@ export function draw(){
   ctx.fillStyle = bar.color;
   ctx.fillRect(0, bar.y, W, bar.height);
 
-  // ghost disk (Eugene's variant only)
-  if(ghostDisk.active && screen.current === 'eugene'){
-    const alpha = ghostDisk.life / GHOST_LIFE;
+  // air-hockey mallet (Eugene's variant only)
+  if(mallet.active && screen.current === 'eugene'){
     ctx.beginPath();
-    ctx.arc(ghostDisk.x, ghostDisk.y, disk.r, 0, Math.PI * 2);
-    ctx.strokeStyle = `rgba(255,255,255,${alpha})`;
-    ctx.lineWidth = 2;
+    ctx.arc(mallet.x, mallet.y, disk.r, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx.lineWidth = 2.5;
     ctx.stroke();
-    ctx.fillStyle = `rgba(255,255,255,${alpha * 0.15})`;
+    // small center dot, like a real mallet handle
+    ctx.beginPath();
+    ctx.arc(mallet.x, mallet.y, 5, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
     ctx.fill();
   }
 
