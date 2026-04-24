@@ -17,6 +17,18 @@ const ALT_DAMP_TANGENTIAL = ALT_SPRING_K/10; // alt friction: damping along tang
 const altFrictionEl   = document.getElementById('altFriction');
 const quadSpringEl    = document.getElementById('quadSpring');
 
+function anyBrickHit(x, y, r, bricks){
+  const r2 = r * r;
+  for(const b of bricks){
+    if(!b.alive) continue;
+    const cx = Math.max(b.x, Math.min(x, b.x + b.w));
+    const cy = Math.max(b.y, Math.min(y, b.y + b.h));
+    const dx = x - cx, dy = y - cy;
+    if(dx*dx + dy*dy < r2) return true;
+  }
+  return false;
+}
+
 export function update(dt){
   // compute bar velocity from position change
   bar.vy = (bar.y - bar.prevY) / dt;
@@ -31,35 +43,9 @@ export function update(dt){
   const friction = params.friction; // 0..1 fractional braking
   const frameMultiplier = params.frameMultiplier;
 
-  // compute brick bounding box and minimum brick dimension for tunneling prevention
-  let brickMinX = Infinity, brickMinY = Infinity, brickMaxX = -Infinity, brickMaxY = -Infinity;
-  let minBrickDim = Infinity;
-  for(const b of bricks){
-    if(!b.alive) continue;
-    if(b.x           < brickMinX) brickMinX = b.x;
-    if(b.y           < brickMinY) brickMinY = b.y;
-    if(b.x + b.w     > brickMaxX) brickMaxX = b.x + b.w;
-    if(b.y + b.h     > brickMaxY) brickMaxY = b.y + b.h;
-    const dim = Math.min(b.w, b.h);
-    if(dim < minBrickDim) minBrickDim = dim;
-  }
-
-  // adaptive substeps: increase when disk is near bricks so it can't tunnel
-  let substeps = SUBSTEPS;
-  const hasBricks = brickMaxY > -Infinity;
-  if(hasBricks){
-    const nearX = disk.x + disk.r > brickMinX && disk.x - disk.r < brickMaxX;
-    const nearY = disk.y - disk.r < brickMaxY + disk.r && disk.y + disk.r > brickMinY - disk.r;
-    if(nearX && nearY){
-      const speed = Math.hypot(disk.vx, disk.vy);
-      const needed = Math.ceil(2 * speed * dt / minBrickDim);
-      if(needed > substeps) substeps = needed;
-    }
-  }
-
-  const subDt = dt / substeps;
+  const subDt = dt / SUBSTEPS;
   const quadratic = quadSpringEl?.dataset.on === 'true';
-  for(let s = 0; s < substeps; s++){
+  for(let s = 0; s < SUBSTEPS; s++){
     // spring toward anchor
     if(anchor.active){
       const dx = anchor.x - disk.x;
@@ -87,32 +73,41 @@ export function update(dt){
         disk.vy += (k * dy - dampVy) * subDt;
       }
     }
+    // integrate position; bisect to first brick contact if needed; at most 1 brick per substep
+    const px = disk.x, py = disk.y;
     disk.x += disk.vx * subDt;
     disk.y += disk.vy * subDt;
-
-    // brick collision: destroy all intersecting bricks, deflect once from deepest hit
-    let bestPen = 0, bestOX = 0, bestOY = 0;
-    for(const b of bricks){
-      if(!b.alive) continue;
-      const cx = Math.max(b.x, Math.min(disk.x, b.x + b.w));
-      const cy = Math.max(b.y, Math.min(disk.y, b.y + b.h));
-      const ddx = disk.x - cx, ddy = disk.y - cy;
-      if(ddx*ddx + ddy*ddy >= disk.r * disk.r) continue;
-      b.alive = false;
-      playKnock(0.6);
-      const oX = (disk.r - Math.abs(disk.x - (b.x + b.w/2))) * Math.sign(disk.x - (b.x + b.w/2));
-      const oY = (disk.r - Math.abs(disk.y - (b.y + b.h/2))) * Math.sign(disk.y - (b.y + b.h/2));
-      const pen = Math.min(Math.abs(oX), Math.abs(oY));
-      if(pen > bestPen){ bestPen = pen; bestOX = oX; bestOY = oY; }
-    }
-    if(bestPen > 0){
-      if(Math.abs(bestOX) < Math.abs(bestOY)){
-        disk.x += bestOX;
-        disk.vx *= -params.bounce;
-      } else {
-        disk.y += bestOY;
-        disk.vy *= -params.bounce;
+    if(anyBrickHit(disk.x, disk.y, disk.r, bricks)){
+      let lo = 0, hi = subDt;
+      for(let i = 0; i < 8; i++){
+        const mid = (lo + hi) * 0.5;
+        if(anyBrickHit(px + disk.vx * mid, py + disk.vy * mid, disk.r, bricks)) hi = mid;
+        else lo = mid;
       }
+      disk.x = px + disk.vx * hi;
+      disk.y = py + disk.vy * hi;
+      for(const b of bricks){
+        if(!b.alive) continue;
+        const cx = Math.max(b.x, Math.min(disk.x, b.x + b.w));
+        const cy = Math.max(b.y, Math.min(disk.y, b.y + b.h));
+        const ddx = disk.x - cx, ddy = disk.y - cy;
+        if(ddx*ddx + ddy*ddy >= disk.r * disk.r) continue;
+        b.alive = false;
+        playKnock(0.6);
+        // push-out and reflection using closest point (correct for all disk/brick size ratios)
+        const enx = disk.x - cx, eny = disk.y - cy;
+        const len = Math.hypot(enx, eny) || 1;
+        const nnx = enx / len, nny = eny / len;
+        disk.x += nnx * (disk.r - len);
+        disk.y += nny * (disk.r - len);
+        const dot = disk.vx * nnx + disk.vy * nny;
+        disk.vx -= (1 + params.bounce) * dot * nnx;
+        disk.vy -= (1 + params.bounce) * dot * nny;
+        break;
+      }
+      // continue with remaining time — next substep handles any further bricks
+      disk.x += disk.vx * (subDt - hi);
+      disk.y += disk.vy * (subDt - hi);
     }
   }
 
