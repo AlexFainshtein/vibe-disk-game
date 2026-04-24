@@ -10,6 +10,15 @@ export function initControls(){
     });
   }
 
+  const quadSpring = document.getElementById('quadSpring');
+  if(quadSpring){
+    quadSpring.addEventListener('click', () => {
+      const isOn = quadSpring.dataset.on === 'true';
+      quadSpring.dataset.on = isOn ? 'false' : 'true';
+      quadSpring.textContent = (isOn ? '○' : '✓') + ' Quadratic Spring';
+    });
+  }
+
   const fullscreenBtn = document.getElementById('fullscreenBtn');
   if(fullscreenBtn){
     fullscreenBtn.addEventListener('pointerdown', (e)=> e.stopPropagation());

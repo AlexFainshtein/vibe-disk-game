@@ -40,6 +40,7 @@ export function update(dt){
       const dist = Math.hypot(dx, dy) || 1;
       const rx = dx / dist, ry = dy / dist;
       const tx = -ry,       ty = rx;
+      const quadratic = quadSpringEl?.dataset.on === 'true';
       if(altFrictionEl?.dataset.on === 'true'){
         const relVx = disk.vx - anchorVx;
         const relVy = disk.vy - anchorVy;
@@ -47,15 +48,17 @@ export function update(dt){
         const tangentialSpeed = relVx * tx + relVy * ty;
         const dampVx = ALT_DAMP_RADIAL * radialSpeed * rx + ALT_DAMP_TANGENTIAL * tangentialSpeed * tx;
         const dampVy = ALT_DAMP_RADIAL * radialSpeed * ry + ALT_DAMP_TANGENTIAL * tangentialSpeed * ty;
-        disk.vx += (ALT_SPRING_K * dx - dampVx) * subDt;
-        disk.vy += (ALT_SPRING_K * dy - dampVy) * subDt;
+        const k = quadratic ? ALT_SPRING_K_SQ * dist : ALT_SPRING_K;
+        disk.vx += (k * dx - dampVx) * subDt;
+        disk.vy += (k * dy - dampVy) * subDt;
       } else {
         const radialSpeed     = disk.vx * rx + disk.vy * ry;
         const tangentialSpeed = disk.vx * tx + disk.vy * ty;
         const dampVx = DAMP_RADIAL * radialSpeed * rx + DAMP_TANGENTIAL * tangentialSpeed * tx;
         const dampVy = DAMP_RADIAL * radialSpeed * ry + DAMP_TANGENTIAL * tangentialSpeed * ty;
-        disk.vx += (SPRING_K * dx - dampVx) * subDt;
-        disk.vy += (SPRING_K * dy - dampVy) * subDt;
+        const k = quadratic ? SPRING_K_SQ * dist : SPRING_K;
+        disk.vx += (k * dx - dampVx) * subDt;
+        disk.vy += (k * dy - dampVy) * subDt;
       }
     }
     disk.x += disk.vx * subDt;
