@@ -43,8 +43,9 @@ export function draw(){
     ctx.stroke();
   }
 
-  // spring line from anchor to disk center
-  if(anchor.active){
+  // spring line from anchor to disk center — Eugene's variant only;
+  // Alex's variant uses the spring physics invisibly. Re-enable per-player by adding to this check.
+  if(anchor.active && screen.current === 'eugene'){
     ctx.beginPath();
     ctx.moveTo(anchor.x, anchor.y);
     ctx.lineTo(disk.x, disk.y);

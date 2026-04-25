@@ -45,7 +45,7 @@ export function playChime(intensity, noteIndex, octaveShift = 0){
 
   const osc = ac.createOscillator();
   const gain = ac.createGain();
-  osc.type = 'square';
+  osc.type = 'triangle';
   osc.frequency.setValueAtTime(freq, ac.currentTime);
   gain.gain.setValueAtTime(vol, ac.currentTime);
   gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + duration);

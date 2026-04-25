@@ -24,7 +24,7 @@ export const params = {
 };
 
 // Disk radius is a fraction of the shorter canvas dimension so it stays right-sized across phones / orientations.
-export const DISK_RADIUS_FRACTION = 1/6;
+export const DISK_RADIUS_FRACTION = 1/10;
 
 export const disk = {
   x: canvas.width/2,
@@ -35,16 +35,18 @@ export const disk = {
   color: '#ffb86b'
 };
 
-const BAR_HEIGHT = 16;
+// Bar thickness is a fraction of the canvas height so it stays right-sized across phones.
+const BAR_HEIGHT_FRACTION = 1/22;
+const initialBarHeight = canvas.height * BAR_HEIGHT_FRACTION;
 const initialBarY = document.body.dataset.player === 'eugene'
-  ? canvas.height - BAR_HEIGHT
+  ? canvas.height - initialBarHeight
   : canvas.height * 0.85;
 
 export const bar = {
   y: initialBarY,
   prevY: initialBarY,
   vy: 0,
-  height: BAR_HEIGHT,
+  height: initialBarHeight,
   color: '#88aacc',
   dragging: false
 };
@@ -52,6 +54,7 @@ export const bar = {
 window.addEventListener('resize', ()=>{
   resizeCanvas();
   disk.r = Math.min(canvas.width, canvas.height) * DISK_RADIUS_FRACTION;
+  bar.height = canvas.height * BAR_HEIGHT_FRACTION;
   if(document.body.dataset.player === 'eugene'){
     bar.y = canvas.height - bar.height;
     bar.prevY = bar.y;

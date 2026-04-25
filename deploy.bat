@@ -9,6 +9,7 @@ copy alex-physics.js public\
 copy alex-targets.js public\
 copy alex-bumper.js public\
 copy alex-trail.js public\
+copy alex-pause.js public\
 copy eugene-physics.js public\
 copy render.js public\
 copy input.js public\

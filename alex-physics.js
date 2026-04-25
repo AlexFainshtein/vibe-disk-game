@@ -2,18 +2,20 @@ import { canvas, params, disk, bar, anchor } from './state.js';
 import { playKnock, playChime } from './sound.js';
 import { tickTargets } from './alex-targets.js';
 import { tickBumper } from './alex-bumper.js';
-import { tickTrail, resetTrail } from './alex-trail.js';
+import { tickTrail, pauseTrail, resetTrail } from './alex-trail.js';
+import { clearPause } from './alex-pause.js';
 
 const MAX_BOUNCE_SPEED = 1200;
 const SPRING_K = 200; // was 40;     // spring stiffness (higher = snappier)
 const SPRING_DAMP = 4;   // damping (higher = less oscillation)
 
-const USE_CHIMES = true;        // pentatonic chime on bounce instead of knock
-const USE_TARGETS = false;      // soft regenerating targets — shelved for now (set true to re-enable)
-const USE_BUMPER = true;        // touch empty space to spawn a bumper that the disk collides with
-const USE_TRAIL = true;         // draw the disk's trajectory; reset on grab, bar move, or bumper hit
-const USE_IDLE_RESET = true;    // reset the game after IDLE_TIMEOUT seconds with no user interaction
-const IDLE_TIMEOUT = 60;        // seconds of idle before the game auto-resets
+const USE_CHIMES = true;            // pentatonic chime on bounce instead of knock
+const USE_TARGETS = false;          // soft regenerating targets — shelved for now (set true to re-enable)
+const USE_BUMPER = true;            // touch empty space to spawn a bumper that the disk collides with
+const USE_TRAIL = true;             // draw the disk's trajectory; resets only on fling, bar move, bumper hit, bumper-removed-after-hit
+const USE_IDLE_RESET = true;        // reset the game after IDLE_TIMEOUT seconds with no user interaction
+const IDLE_TIMEOUT = 10;            // seconds of idle before the game auto-resets
+const FLING_SPEED_THRESHOLD = 200;  // px/sec at release; above this counts as a fling and erases the trail
 
 let idleTime = 0;
 let prevAnchorActive = false;
@@ -43,9 +45,20 @@ export function update(dt){
   const friction = params.friction; // 0..1 fractional braking
   const frameMultiplier = params.frameMultiplier;
 
-  // grab transition (anchor going inactive → active); used by trail reset
+  // anchor transitions: grabbed pauses trail recording + clears pause state; released decides fling vs. place
   const grabbed = anchor.active && !prevAnchorActive;
+  const released = !anchor.active && prevAnchorActive;
   prevAnchorActive = anchor.active;
+
+  if(grabbed) clearPause();
+
+  // No-fling release: if the user lets go with the disk barely moving, treat it as a deliberate placement
+  // and zero the velocity so the disk freezes wherever they put it.
+  const flung = released && Math.hypot(disk.vx, disk.vy) > FLING_SPEED_THRESHOLD;
+  if(released && !flung){
+    disk.vx = 0;
+    disk.vy = 0;
+  }
 
   // damped spring toward anchor
   if(anchor.active){
@@ -75,7 +88,7 @@ export function update(dt){
   disk.y += disk.vy * dt;
 
   // bumper collision before walls so a bumper-push that lands the disk in a wall is resolved this frame
-  const bumperEvents = USE_BUMPER ? tickBumper() : { firstHit: false, placed: false, removed: false };
+  const bumperEvents = USE_BUMPER ? tickBumper() : { firstHit: false, placed: false, removed: false, removedAfterHit: false };
 
   const W = canvas.width, H = canvas.height;
   let bounced = false, bounceSpeed = 0;
@@ -98,8 +111,9 @@ export function update(dt){
   if(USE_TARGETS) tickTargets(dt);
 
   if(USE_TRAIL){
-    if(grabbed || barMoved || bumperEvents.firstHit || bumperEvents.removed) resetTrail();
-    tickTrail();
+    if(grabbed) pauseTrail();
+    if(flung || barMoved || bumperEvents.firstHit || bumperEvents.removedAfterHit) resetTrail();
+    if(!anchor.active) tickTrail();
   }
 
   if(USE_IDLE_RESET){
@@ -107,8 +121,9 @@ export function update(dt){
     if(userInteracting) idleTime = 0;
     else idleTime += dt;
     if(idleTime >= IDLE_TIMEOUT){
-      // click the Reset button so all subscribers (bar/disk reset, bumper clear, trail clear) fire
-      document.getElementById('resetDisk')?.click();
+      // freeze the picture: stop the disk in place, but don't reset position, bar, bumper, or trail
+      disk.vx = 0;
+      disk.vy = 0;
       idleTime = 0;
     }
   }

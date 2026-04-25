@@ -20,10 +20,12 @@ const bumper = {
 window.addEventListener('resize', ()=>{ bumper.r = computeBumperRadius(); }, { passive: true });
 
 let initialized = false;
-let firstHitPending = false;       // true between bumper placement and the first disk-bumper collision
-let firstHitSinceLastTick = false; // event flag: first collision happened during this tick
-let placedSinceLastTick = false;   // event flag: bumper just placed or relocated by user input
-let removedSinceLastTick = false;  // event flag: bumper went from active to inactive (tapped or relocated)
+let firstHitPending = false;            // true between bumper placement and the first disk-bumper collision
+let hitDuringThisPlacement = false;     // sticky flag: any collision happened during the current placement
+let firstHitSinceLastTick = false;      // event flag: first collision happened during this tick
+let placedSinceLastTick = false;        // event flag: bumper just placed or relocated by user input
+let removedSinceLastTick = false;       // event flag: bumper went from active to inactive (any cause)
+let removedAfterHitSinceLastTick = false; // event flag: removal followed at least one collision (trajectory was actually altered)
 
 function drawBumper(c){
   if(!bumper.active) return;
@@ -38,6 +40,7 @@ function place(x, y){
   bumper.x = x;
   bumper.y = y;
   firstHitPending = true;
+  hitDuringThisPlacement = false;
   placedSinceLastTick = true;
 }
 
@@ -46,6 +49,8 @@ function remove(){
   bumper.active = false;
   firstHitPending = false;
   removedSinceLastTick = true;
+  if(hitDuringThisPlacement) removedAfterHitSinceLastTick = true;
+  hitDuringThisPlacement = false;
 }
 
 function init(){
@@ -98,6 +103,7 @@ function checkCollision(){
   disk.vy -= factor * ny;
   const intensity = Math.min(Math.abs(vDotN) / MAX_BOUNCE_SPEED, 1);
   playKnock(intensity);
+  hitDuringThisPlacement = true;
   if(firstHitPending){
     firstHitPending = false;
     firstHitSinceLastTick = true;
@@ -108,12 +114,14 @@ export function tickBumper(){
   if(!initialized) init();
   checkCollision();
   const events = {
-    firstHit: firstHitSinceLastTick,
-    placed:   placedSinceLastTick,
-    removed:  removedSinceLastTick
+    firstHit:        firstHitSinceLastTick,
+    placed:          placedSinceLastTick,
+    removed:         removedSinceLastTick,
+    removedAfterHit: removedAfterHitSinceLastTick
   };
   firstHitSinceLastTick = false;
   placedSinceLastTick = false;
   removedSinceLastTick = false;
+  removedAfterHitSinceLastTick = false;
   return events;
 }
