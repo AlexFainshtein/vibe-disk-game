@@ -60,7 +60,7 @@ Alex's variant introduces small features one at a time. Each lives behind a `con
 - `USE_TARGETS` — soft regenerating circles in the playfield. Currently shelved (false).
 - `USE_BUMPER` — touch empty space to place a static bumper.
 - `USE_TRAIL` — draws the disk's current trajectory.
-- `USE_IDLE_RESET` — after `IDLE_TIMEOUT` seconds of no user interaction, freezes the disk in place (zeros velocity); does **not** reset position, bar, bumper, or trail.
+- `USE_IDLE_RESET` — after `IDLE_TIMEOUT` seconds of no user interaction, freezes the disk in place (zeros velocity); does **not** reset position, bar, bumper, or trail. Off by default — the Pause button covers this use case.
 
 Plus tunables: `FLING_SPEED_THRESHOLD` (px/sec) — releases above this count as flings (which erase the trail and let the disk continue); releases at or below freeze the disk in place. Pause is a separate UI feature in [alex-pause.js](alex-pause.js); not flag-gated, just present when alex.html includes the `#pauseBtn` element.
 

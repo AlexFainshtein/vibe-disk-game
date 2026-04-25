@@ -13,8 +13,8 @@ const USE_CHIMES = true;            // pentatonic chime on bounce instead of kno
 const USE_TARGETS = false;          // soft regenerating targets — shelved for now (set true to re-enable)
 const USE_BUMPER = true;            // touch empty space to spawn a bumper that the disk collides with
 const USE_TRAIL = true;             // draw the disk's trajectory; resets only on fling, bar move, bumper hit, bumper-removed-after-hit
-const USE_IDLE_RESET = true;        // reset the game after IDLE_TIMEOUT seconds with no user interaction
-const IDLE_TIMEOUT = 10;            // seconds of idle before the game auto-resets
+const USE_IDLE_RESET = false;       // freeze the disk after IDLE_TIMEOUT seconds idle. Off by default — the Pause button covers this use case.
+const IDLE_TIMEOUT = 60;            // seconds of idle before the disk's velocity is zeroed (only used when USE_IDLE_RESET is true)
 const FLING_SPEED_THRESHOLD = 200;  // px/sec at release; above this counts as a fling and erases the trail
 
 let idleTime = 0;
