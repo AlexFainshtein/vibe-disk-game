@@ -1,4 +1,4 @@
-import { canvas, disk, bar, clickMarker, diskHistory, anchor, inputHooks } from './state.js';
+import { canvas, disk, bar, clickMarker, diskHistory, anchor, inputHooks, mallet } from './state.js';
 import { playGrab, playRelease } from './sound.js';
 
 function eventPos(e){
@@ -21,6 +21,7 @@ function clampAnchor(x, y){
 export function setupInput(){
   let barGrabOffset = 0;
   let emptyEngaged = false; // a feature module captured the current empty-space pointer
+  let prevPointer = null; // {x, y, t} — used to estimate tap velocity for ghost disk
 
   // Prevent double-tap-and-hold text-selection loupe on iOS (canvas only, so buttons still work)
   let lastTouchEnd = 0;
@@ -66,16 +67,35 @@ export function setupInput(){
       anchor.y = clamped.y;
       anchor.prevX = clamped.x;
       anchor.prevY = clamped.y;
+      disk.glass = false;
       playGrab();
+      canvas.setPointerCapture(ev.pointerId);
+    } else if(document.body.dataset.player === 'eugene'){
+      // Spawn the air-hockey mallet at the tap position (Eugene's variant only).
+      mallet.active = true;
+      mallet.x = p.x;
+      mallet.y = p.y;
+      mallet.prevX = p.x;
+      mallet.prevY = p.y;
+      mallet.vx = 0;
+      mallet.vy = 0;
       canvas.setPointerCapture(ev.pointerId);
     } else if(inputHooks.emptyDown){
       emptyEngaged = inputHooks.emptyDown(p.x, p.y) === true;
       if(emptyEngaged) canvas.setPointerCapture(ev.pointerId);
     }
+    prevPointer = p;
   });
 
   canvas.addEventListener('pointermove', (ev)=>{
     const p = eventPos(ev);
+    prevPointer = p;
+    if(mallet.active){
+      mallet.prevX = mallet.x;
+      mallet.prevY = mallet.y;
+      mallet.x = p.x;
+      mallet.y = p.y;
+    }
     if(bar.dragging){
       const minBarY = disk.r * 2;
       let newBarY = p.y + barGrabOffset;
@@ -112,6 +132,10 @@ export function setupInput(){
       playRelease();
       try{ canvas.releasePointerCapture(ev.pointerId); }catch(e){}
       return;
+    }
+    if(mallet.active){
+      mallet.active = false;
+      try{ canvas.releasePointerCapture(ev.pointerId); }catch(e){}
     }
     if(emptyEngaged){
       emptyEngaged = false;

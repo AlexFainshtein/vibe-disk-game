@@ -32,7 +32,8 @@ export const disk = {
   r: Math.min(canvas.width, canvas.height) * DISK_RADIUS_FRACTION,
   vx: 0,
   vy: 0,
-  color: '#ffb86b'
+  color: '#ffb86b',
+  glass: false
 };
 
 // Bar thickness is a fraction of the canvas height so it stays right-sized across phones.
@@ -79,6 +80,47 @@ export const anchor = {
 export const clickMarker = {
   active: false,
   hit: false
+};
+
+export const bricks = [];
+export function initBricks(){
+  bricks.length = 0;
+  if(document.body.dataset.player !== 'eugene') return;
+  const cols = 7, rows = 4;
+  const gap = 5;
+  const brickW = (canvas.width - gap * (cols + 1)) / cols;
+  const brickH = 20;
+  const startY = 120;
+  const rowColors = ['#7a1a3a','#6b1a45','#5c1a50','#4d1a5b'];
+  for(let r = 0; r < rows; r++){
+    for(let c = 2; c < cols; c++){
+      bricks.push({
+        x: gap + c * (brickW + gap),
+        y: startY + r * (brickH + gap),
+        w: brickW,
+        h: brickH,
+        alive: true,
+        color: rowColors[r]
+      });
+    }
+  }
+}
+
+// bubble pop animation state
+export const bubblePop = {
+  active: false,
+  x: 0, y: 0,
+  t: 0,
+  duration: 0.45,
+  particles: [] // [{ax, ay}] unit-ish direction vectors
+};
+
+// air-hockey mallet: appears on a tap-miss, follows the finger, deflects the disk
+export const mallet = {
+  active: false,
+  x: 0, y: 0,
+  prevX: 0, prevY: 0,
+  vx: 0, vy: 0
 };
 
 // recent disk positions for lag-compensated hit detection
