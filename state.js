@@ -19,15 +19,17 @@ export const params = {
   // friction is a fraction in [0,1]. It represents the proportional
   // deceleration factor applied per second (higher = stronger braking).
   friction: 0,
-  diskRadius: 60,
   frameMultiplier: 1,
   bounce: 1
 };
 
+// Disk radius is a fraction of the shorter canvas dimension so it stays right-sized across phones / orientations.
+export const DISK_RADIUS_FRACTION = 1/6;
+
 export const disk = {
   x: canvas.width/2,
   y: canvas.height/2,
-  r: params.diskRadius,
+  r: Math.min(canvas.width, canvas.height) * DISK_RADIUS_FRACTION,
   vx: 0,
   vy: 0,
   color: '#ffb86b'
@@ -49,6 +51,7 @@ export const bar = {
 
 window.addEventListener('resize', ()=>{
   resizeCanvas();
+  disk.r = Math.min(canvas.width, canvas.height) * DISK_RADIUS_FRACTION;
   if(document.body.dataset.player === 'eugene'){
     bar.y = canvas.height - bar.height;
     bar.prevY = bar.y;
@@ -82,3 +85,15 @@ export function recordDiskPosition(){
   diskHistory.push({x: disk.x, y: disk.y});
   if(diskHistory.length > HISTORY_SIZE) diskHistory.shift();
 }
+
+// render extension points: feature modules push (ctx) => void callbacks here.
+// render.js calls them after the bar and before the disk so extras sit in the playfield, behind the disk.
+export const renderExtras = [];
+
+// input extension points: feature modules can register handlers for touches on empty space
+// (i.e. neither the bar nor the disk). emptyDown returns true to capture the pointer for subsequent move/up.
+export const inputHooks = {
+  emptyDown: null, // (x, y) => boolean
+  emptyMove: null, // (x, y) => void
+  emptyUp:   null  // () => void
+};

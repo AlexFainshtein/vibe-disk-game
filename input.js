@@ -1,4 +1,4 @@
-import { canvas, disk, bar, clickMarker, diskHistory, anchor } from './state.js';
+import { canvas, disk, bar, clickMarker, diskHistory, anchor, inputHooks } from './state.js';
 import { playGrab, playRelease } from './sound.js';
 
 function eventPos(e){
@@ -20,6 +20,7 @@ function clampAnchor(x, y){
 
 export function setupInput(){
   let barGrabOffset = 0;
+  let emptyEngaged = false; // a feature module captured the current empty-space pointer
 
   // Prevent double-tap-and-hold text-selection loupe on iOS (canvas only, so buttons still work)
   let lastTouchEnd = 0;
@@ -67,6 +68,9 @@ export function setupInput(){
       anchor.prevY = clamped.y;
       playGrab();
       canvas.setPointerCapture(ev.pointerId);
+    } else if(inputHooks.emptyDown){
+      emptyEngaged = inputHooks.emptyDown(p.x, p.y) === true;
+      if(emptyEngaged) canvas.setPointerCapture(ev.pointerId);
     }
   });
 
@@ -89,6 +93,10 @@ export function setupInput(){
       const clamped = clampAnchor(p.x, p.y);
       anchor.x = clamped.x;
       anchor.y = clamped.y;
+      return;
+    }
+    if(emptyEngaged && inputHooks.emptyMove){
+      inputHooks.emptyMove(p.x, p.y);
     }
   });
 
@@ -102,6 +110,12 @@ export function setupInput(){
       anchor.active = false;
       clickMarker.active = false;
       playRelease();
+      try{ canvas.releasePointerCapture(ev.pointerId); }catch(e){}
+      return;
+    }
+    if(emptyEngaged){
+      emptyEngaged = false;
+      if(inputHooks.emptyUp) inputHooks.emptyUp();
       try{ canvas.releasePointerCapture(ev.pointerId); }catch(e){}
     }
   });

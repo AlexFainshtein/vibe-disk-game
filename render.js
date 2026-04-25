@@ -1,4 +1,4 @@
-import { canvas, ctx, disk, bar, clickMarker, anchor, screen } from './state.js';
+import { canvas, ctx, disk, bar, clickMarker, anchor, screen, renderExtras } from './state.js';
 
 export function draw(){
   const W = canvas.width, H = canvas.height;
@@ -12,6 +12,9 @@ export function draw(){
   // bar
   ctx.fillStyle = bar.color;
   ctx.fillRect(0, bar.y, W, bar.height);
+
+  // feature-supplied extras (e.g. targets), behind the disk
+  for(const fn of renderExtras) fn(ctx);
 
   // shadow
   ctx.beginPath();
