@@ -1,9 +1,27 @@
 import { canvas, params, disk, bar, anchor } from './state.js';
-import { playKnock } from './sound.js';
+import { playKnock, playChime } from './sound.js';
 
 const MAX_BOUNCE_SPEED = 1200;
-const SPRING_K = 40;     // spring stiffness (higher = snappier)
+const SPRING_K = 200; // was 40;     // spring stiffness (higher = snappier)
 const SPRING_DAMP = 4;   // damping (higher = less oscillation)
+
+const USE_CHIMES = true; // pentatonic chime on bounce instead of knock
+
+// Map disk vertical position at bounce time to one of 5 pentatonic notes.
+// Touching the bar → 0 (lowest), touching the ceiling → 4 (highest);
+// the middle band of height (H - 2R) is split into 3 equal stripes for 1, 2, 3.
+function noteFromY(){
+  const physY = bar.y - disk.y; // height of disk center above the bar
+  const H = bar.y;
+  const R = disk.r;
+  const eps = 0.5;
+  if(physY <= R + eps) return 0;
+  if(physY >= H - R - eps) return 4;
+  const t = (physY - R - eps) / (H - 2*R - 2*eps); // 0..1 across middle band
+  if(t < 1/3) return 1;
+  if(t < 2/3) return 2;
+  return 3;
+}
 
 export function update(dt){
   // compute bar velocity from position change
@@ -52,5 +70,9 @@ export function update(dt){
     disk.vy = -Math.abs(disk.vy) * params.bounce + 2 * bar.vy;
     bounced = true;
   }
-  if(bounced) playKnock(Math.min(bounceSpeed / MAX_BOUNCE_SPEED, 1));
+  if(bounced){
+    const intensity = Math.min(bounceSpeed / MAX_BOUNCE_SPEED, 1);
+    if(USE_CHIMES) playChime(intensity, noteFromY());
+    else playKnock(intensity);
+  }
 }
