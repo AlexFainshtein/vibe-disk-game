@@ -1,4 +1,4 @@
-import { canvas, params } from './state.js';
+import { canvas, params, renderExtras } from './state.js';
 import { disk, bar, anchor } from './playfield.js';
 import { playKnock, playChime } from './sound.js';
 import { tickTargets } from './alex-targets.js';
@@ -6,6 +6,23 @@ import { tickBumper } from './alex-bumper.js';
 import { tickTrail, pauseTrail, resetTrail } from './alex-trail.js';
 import { clearPause } from './alex-pause.js';
 import { createSpringDragController } from './controller-spring-drag.js';
+
+// Visual feedback for the spring controller — green line + dot from anchor to
+// disk while held. Matches Eugene's variant for consistency.
+function drawSpringLine(c){
+  if(!anchor.active) return;
+  c.beginPath();
+  c.moveTo(anchor.x, anchor.y);
+  c.lineTo(disk.x, disk.y);
+  c.strokeStyle = '#00ff00';
+  c.lineWidth = 2;
+  c.stroke();
+  c.beginPath();
+  c.arc(anchor.x, anchor.y, 5, 0, Math.PI*2);
+  c.fillStyle = '#00ff00';
+  c.fill();
+}
+renderExtras.push(drawSpringLine);
 
 const MAX_BOUNCE_SPEED = 1200;
 

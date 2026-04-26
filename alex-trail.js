@@ -30,7 +30,10 @@ function init(){
   initialized = true;
   renderExtras.push(drawTrail);
   // Trail is intentionally NOT cleared on Reset — the trajectory is the interesting pattern the user
-  // wants to keep seeing after the disk has stopped.
+  // wants to keep seeing after the disk has stopped. But Reset teleports the disk to the center, so
+  // we break the current segment to avoid drawing a synthetic straight line from the old position to
+  // the center on the next frame.
+  document.getElementById('resetDisk')?.addEventListener('click', pauseTrail);
 }
 
 export function tickTrail(){

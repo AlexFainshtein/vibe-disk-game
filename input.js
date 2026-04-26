@@ -55,8 +55,8 @@ export function setupInput(){
         }
       }
     }
-    if(hit) console.log('Hit! Frame lag:', hitFrame, '(0 = current frame)');
-    else console.log('Miss');
+    // if(hit) console.log('Hit! Frame lag:', hitFrame, '(0 = current frame)');
+    // else console.log('Miss');
     clickMarker.hit = hit;
     clickMarker.active = true;
 
