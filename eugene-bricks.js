@@ -5,15 +5,15 @@ import { disk } from './playfield.js';
 // animation that fires when the disk's "glass" mode pops against a brick. bubblePop
 // is colocated here because its lifecycle is triggered by brick collision.
 //
-// Self-registers a render hook and a Reset-button listener at module load.
-// Brick collision logic itself lives in eugene-physics.js (it's interleaved with
-// the substep integration there).
+// Self-registers a render hook and a Reset-button listener at module load. This
+// file is only loaded on Eugene's page (main.js dynamically imports the active
+// physics module, which transitively imports this one). Brick collision logic
+// itself lives in eugene-physics.js (it's interleaved with the substep integration there).
 
 export const bricks = [];
 
 export function initBricks(){
   bricks.length = 0;
-  if(document.body.dataset.player !== 'eugene') return;
   const cols = 7, rows = 4;
   const gap = 5;
   const brickW = (canvas.width - gap * (cols + 1)) / cols;
@@ -86,11 +86,7 @@ function drawBubblePop(c){
   }
 }
 
-// main.js eagerly imports both Alex's and Eugene's physics modules; gate side effects
-// on player so this module is inert on Alex's page.
-if(document.body.dataset.player === 'eugene'){
-  renderExtras.push(drawBricks);
-  renderExtras.push(drawBubblePop);
-  initBricks();
-  document.getElementById('resetDisk')?.addEventListener('click', initBricks);
-}
+renderExtras.push(drawBricks);
+renderExtras.push(drawBubblePop);
+initBricks();
+document.getElementById('resetDisk')?.addEventListener('click', initBricks);

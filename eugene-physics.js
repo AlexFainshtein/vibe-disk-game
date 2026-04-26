@@ -20,9 +20,7 @@ function drawSpringLine(c){
   c.fillStyle = '#00ff00';
   c.fill();
 }
-if(document.body.dataset.player === 'eugene'){
-  renderExtras.push(drawSpringLine);
-}
+renderExtras.push(drawSpringLine);
 
 const MAX_BOUNCE_SPEED = 1200;
 

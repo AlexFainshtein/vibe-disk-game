@@ -39,34 +39,29 @@ function drawMallet(c){
   c.fill();
 }
 
-// main.js eagerly imports both Alex's and Eugene's physics modules so it can pick
-// one at runtime; that means this module's top-level code runs on Alex's page too.
-// Gate the side effects (renderExtras / inputHooks registration) on player so we
-// don't clobber Alex's bumper hook. The collision logic in tickMallet is also a
-// no-op on Alex's page because mallet.active never becomes true there.
-if(document.body.dataset.player === 'eugene'){
-  renderExtras.push(drawMallet);
+// This file is only loaded on Eugene's page (main.js dynamically imports the active
+// physics module). No need to guard the registrations on player.
+renderExtras.push(drawMallet);
 
-  inputHooks.emptyDown = (x, y) => {
-    mallet.active = true;
-    mallet.x = x;
-    mallet.y = y;
-    mallet.prevX = x;
-    mallet.prevY = y;
-    mallet.vx = 0;
-    mallet.vy = 0;
-    return true; // capture pointer for subsequent move/up
-  };
-  inputHooks.emptyMove = (x, y) => {
-    mallet.prevX = mallet.x;
-    mallet.prevY = mallet.y;
-    mallet.x = x;
-    mallet.y = y;
-  };
-  inputHooks.emptyUp = () => {
-    mallet.active = false;
-  };
-}
+inputHooks.emptyDown = (x, y) => {
+  mallet.active = true;
+  mallet.x = x;
+  mallet.y = y;
+  mallet.prevX = x;
+  mallet.prevY = y;
+  mallet.vx = 0;
+  mallet.vy = 0;
+  return true; // capture pointer for subsequent move/up
+};
+inputHooks.emptyMove = (x, y) => {
+  mallet.prevX = mallet.x;
+  mallet.prevY = mallet.y;
+  mallet.x = x;
+  mallet.y = y;
+};
+inputHooks.emptyUp = () => {
+  mallet.active = false;
+};
 
 export function tickMallet(dt){
   if(!mallet.active) return;

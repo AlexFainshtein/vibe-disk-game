@@ -3,11 +3,13 @@ import { disk, recordDiskPosition } from './playfield.js';
 import { draw } from './render.js';
 import { setupInput } from './input.js';
 import { initControls } from './controls.js';
-import { update as alexUpdate } from './alex-physics.js';
-import { update as eugeneUpdate } from './eugene-physics.js';
 
+// Dynamic import: only the active variant's physics + its feature modules are
+// fetched and executed. Top-level await is supported in all modern browsers and
+// keeps the rest of this file linear.
 const player = document.body.dataset.player ?? 'alex';
-const update = player === 'eugene' ? eugeneUpdate : alexUpdate;
+const physicsModule = await import(player === 'eugene' ? './eugene-physics.js' : './alex-physics.js');
+const update = physicsModule.update;
 
 let lastTime = performance.now();
 
