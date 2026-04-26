@@ -5,10 +5,9 @@ import { tickTargets } from './alex-targets.js';
 import { tickBumper } from './alex-bumper.js';
 import { tickTrail, pauseTrail, resetTrail } from './alex-trail.js';
 import { clearPause } from './alex-pause.js';
+import { createSpringDragController } from './controller-spring-drag.js';
 
 const MAX_BOUNCE_SPEED = 1200;
-const SPRING_K = 200; // was 40;     // spring stiffness (higher = snappier)
-const SPRING_DAMP = 4;   // damping (higher = less oscillation)
 
 const USE_CHIMES = true;            // pentatonic chime on bounce instead of knock
 const USE_TARGETS = false;          // soft regenerating targets — shelved for now (set true to re-enable)
@@ -16,10 +15,17 @@ const USE_BUMPER = true;            // touch empty space to spawn a bumper that 
 const USE_TRAIL = true;             // draw the disk's trajectory; resets only on fling, bar move, bumper hit, bumper-removed-after-hit
 const USE_IDLE_RESET = false;       // freeze the disk after IDLE_TIMEOUT seconds idle. Off by default — the Pause button covers this use case.
 const IDLE_TIMEOUT = 60;            // seconds of idle before the disk's velocity is zeroed (only used when USE_IDLE_RESET is true)
-const FLING_SPEED_THRESHOLD = 200;  // px/sec at release; above this counts as a fling and erases the trail
+
+// Spring-drag is the user's control scheme: hold the disk, the disk springs toward
+// the finger, release classifies as fling or place. Tuning lives here so Alex can
+// pick its own feel without touching the controller module.
+const springDrag = createSpringDragController({
+  springK: 200,         // spring stiffness (higher = snappier)
+  springDamp: 4,        // damping (higher = less oscillation)
+  flingThreshold: 200,  // px/sec at release; above this counts as a fling and erases the trail
+});
 
 let idleTime = 0;
-let prevAnchorActive = false;
 
 // Map disk vertical position at bounce time to one of 5 pentatonic notes.
 // Touching the bar → 0 (lowest), touching the ceiling → 4 (highest);
@@ -46,28 +52,10 @@ export function update(dt){
   const friction = params.friction; // 0..1 fractional braking
   const frameMultiplier = params.frameMultiplier;
 
-  // anchor transitions: grabbed pauses trail recording + clears pause state; released decides fling vs. place
-  const grabbed = anchor.active && !prevAnchorActive;
-  const released = !anchor.active && prevAnchorActive;
-  prevAnchorActive = anchor.active;
-
-  if(grabbed) clearPause();
-
-  // No-fling release: if the user lets go with the disk barely moving, treat it as a deliberate placement
-  // and zero the velocity so the disk freezes wherever they put it.
-  const flung = released && Math.hypot(disk.vx, disk.vy) > FLING_SPEED_THRESHOLD;
-  if(released && !flung){
-    disk.vx = 0;
-    disk.vy = 0;
-  }
-
-  // damped spring toward anchor
-  if(anchor.active){
-    const dx = anchor.x - disk.x;
-    const dy = anchor.y - disk.y;
-    disk.vx += (SPRING_K * dx - SPRING_DAMP * disk.vx) * dt;
-    disk.vy += (SPRING_K * dy - SPRING_DAMP * disk.vy) * dt;
-  }
+  // Spring-drag controller: applies the spring force, classifies release.
+  // Returns the gesture events the rest of update() reacts to.
+  const ctrl = springDrag(disk, anchor, dt);
+  if(ctrl.grabbed) clearPause();
 
   // friction (only when spring is not active)
   const speed = Math.hypot(disk.vx, disk.vy);
@@ -112,8 +100,8 @@ export function update(dt){
   if(USE_TARGETS) tickTargets(dt);
 
   if(USE_TRAIL){
-    if(grabbed) pauseTrail();
-    if(flung || barMoved || bumperEvents.firstHit || bumperEvents.removedAfterHit) resetTrail();
+    if(ctrl.grabbed) pauseTrail();
+    if(ctrl.flung || barMoved || bumperEvents.firstHit || bumperEvents.removedAfterHit) resetTrail();
     if(!anchor.active) tickTrail();
   }
 
