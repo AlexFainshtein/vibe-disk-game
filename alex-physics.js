@@ -7,19 +7,23 @@ import { tickTrail, pauseTrail, resetTrail } from './alex-trail.js';
 import { clearPause } from './alex-pause.js';
 import { createSpringDragController } from './controller-spring-drag.js';
 
-// Visual feedback for the spring controller — green line + dot from anchor to
-// disk while held. Matches Eugene's variant for consistency.
+// Alex-specific color palette (overrides the warm defaults in playfield.js).
+// Background gradient is set in state.js (screen.backgrounds.alex).
+disk.color = '#ffa53d'; // saturated amber — the protagonist
+bar.color  = '#3a4a66'; // dark slate — playfield furniture, shared with the bumper
+const SPRING_COLOR = '#22e8c4'; // vivid teal-mint — between cyan and green, strong but not neon
+
 function drawSpringLine(c){
   if(!anchor.active) return;
   c.beginPath();
   c.moveTo(anchor.x, anchor.y);
   c.lineTo(disk.x, disk.y);
-  c.strokeStyle = '#00ff00';
+  c.strokeStyle = SPRING_COLOR;
   c.lineWidth = 2;
   c.stroke();
   c.beginPath();
   c.arc(anchor.x, anchor.y, 5, 0, Math.PI*2);
-  c.fillStyle = '#00ff00';
+  c.fillStyle = SPRING_COLOR;
   c.fill();
 }
 renderExtras.push(drawSpringLine);

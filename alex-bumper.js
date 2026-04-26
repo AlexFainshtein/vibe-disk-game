@@ -4,7 +4,7 @@ import { playKnock } from './sound.js';
 
 // Bumper radius is a fraction of the shorter canvas dimension so it stays right-sized across phones / orientations.
 const BUMPER_RADIUS_FRACTION = 1/6;
-const BUMPER_COLOR = '#dca96d';  // warm tan, contrasts with the disk's orange
+const BUMPER_COLOR = '#3a4a66';  // dark slate — same hue as the bar so disk-affecting "furniture" reads as one visual group
 const MAX_BOUNCE_SPEED = 1200;   // matches alex-physics.js for consistent knock intensity
 
 function computeBumperRadius(){
