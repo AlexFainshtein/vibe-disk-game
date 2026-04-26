@@ -4,22 +4,25 @@ import { disk } from './playfield.js';
 const TRAIL_COLOR = 'rgba(255, 255, 255, 0.28)';
 const TRAIL_WIDTH = 1.5;
 
-// trail is an array of segments; each segment is an array of {x, y}.
+// trail is an array of segments; each segment is { color, points: [{x, y}, ...] }.
 // Segments let us pause recording (e.g. while the user is holding the disk) and
 // resume later without drawing a straight line between the pre-pause and post-resume points.
+// Per-segment color lets the throwaway "reverse" experiment paint a new color on top
+// of the existing white trail (see setTrailColor in alex-physics.js).
 const trail = [];
 let currentSegment = null;
+let nextSegmentColor = TRAIL_COLOR;
 let initialized = false;
 
 function drawTrail(c){
-  c.strokeStyle = TRAIL_COLOR;
   c.lineWidth = TRAIL_WIDTH;
   for(const segment of trail){
-    if(segment.length < 2) continue;
+    if(segment.points.length < 2) continue;
+    c.strokeStyle = segment.color;
     c.beginPath();
-    c.moveTo(segment[0].x, segment[0].y);
-    for(let i = 1; i < segment.length; i++){
-      c.lineTo(segment[i].x, segment[i].y);
+    c.moveTo(segment.points[0].x, segment.points[0].y);
+    for(let i = 1; i < segment.points.length; i++){
+      c.lineTo(segment.points[i].x, segment.points[i].y);
     }
     c.stroke();
   }
@@ -39,10 +42,10 @@ function init(){
 export function tickTrail(){
   if(!initialized) init();
   if(!currentSegment){
-    currentSegment = [];
+    currentSegment = { color: nextSegmentColor, points: [] };
     trail.push(currentSegment);
   }
-  currentSegment.push({ x: disk.x, y: disk.y });
+  currentSegment.points.push({ x: disk.x, y: disk.y });
 }
 
 // Mark a break in the trail so the next recorded point starts a new segment.
@@ -54,5 +57,19 @@ export function pauseTrail(){
 
 export function resetTrail(){
   trail.length = 0;
+  currentSegment = null;
+}
+
+// Set the color used for subsequently recorded segments and close the current
+// segment so the new color takes effect on the very next tick.
+export function setTrailColor(color){
+  nextSegmentColor = color;
+  currentSegment = null;
+}
+
+// Restore the default trail color (used by the throwaway "reverse" experiment
+// when Reset is pressed).
+export function resetTrailColor(){
+  nextSegmentColor = TRAIL_COLOR;
   currentSegment = null;
 }

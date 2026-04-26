@@ -3,7 +3,7 @@ import { disk, bar, anchor } from './playfield.js';
 import { playKnock, playChime } from './sound.js';
 import { tickTargets } from './alex-targets.js';
 import { tickBumper } from './alex-bumper.js';
-import { tickTrail, pauseTrail, resetTrail } from './alex-trail.js';
+import { tickTrail, pauseTrail, resetTrail, setTrailColor, resetTrailColor } from './alex-trail.js';
 import { clearPause } from './alex-pause.js';
 import { createSpringDragController } from './controller-spring-drag.js';
 
@@ -12,6 +12,11 @@ import { createSpringDragController } from './controller-spring-drag.js';
 disk.color = '#ffa53d'; // saturated amber — the protagonist
 bar.color  = '#3a4a66'; // dark slate — playfield furniture, shared with the bumper
 const SPRING_COLOR = '#22e8c4'; // vivid teal-mint — between cyan and green, strong but not neon
+
+// Alex's bar lives at the top of the canvas as a movable ceiling; the disk lives
+// below it with the canvas bottom as the floor. This flips the wall collisions
+// in update() and the note mapping in noteFromY (compared to Eugene's bottom-bar layout).
+bar.layout = 'top';
 
 function drawSpringLine(c){
   if(!anchor.active) return;
@@ -27,6 +32,40 @@ function drawSpringLine(c){
   c.fill();
 }
 renderExtras.push(drawSpringLine);
+
+// EXPERIMENT (throwaway): press R to negate the disk's velocity and start a
+// new trail in a contrasting color. Lets us watch the disk retrace its path
+// in reverse and see how quickly the two trails diverge from rounding errors.
+// Successive presses cycle through a small palette so multiple reversals are
+// visually distinct. Reset restores the default white and rewinds the cycle.
+// Remove this block + the setTrailColor/resetTrailColor imports + per-segment
+// color support in alex-trail.js if not adopted.
+const REVERSE_COLORS = [
+  'rgba(255, 90, 200, 0.60)',  // magenta
+  'rgba(120, 230, 255, 0.60)', // cyan
+  'rgba(255, 220, 80, 0.60)',  // gold
+];
+let reverseIdx = 0;
+function doReverse(){
+  disk.vx = -disk.vx;
+  disk.vy = -disk.vy;
+  setTrailColor(REVERSE_COLORS[reverseIdx]);
+  // Seed the new segment at the disk's current position so the new trail
+  // visually joins the end of the previous one (otherwise its first point
+  // would be one integration step away in the reversed direction).
+  tickTrail();
+  reverseIdx = (reverseIdx + 1) % REVERSE_COLORS.length;
+}
+window.addEventListener('keydown', (e) => {
+  if(e.key === 'r' || e.key === 'R') doReverse();
+});
+const reverseBtn = document.getElementById('reverseBtn');
+reverseBtn?.addEventListener('pointerdown', (e) => e.stopPropagation()); // don't let the canvas see the tap
+reverseBtn?.addEventListener('click', doReverse);
+document.getElementById('resetDisk')?.addEventListener('click', () => {
+  resetTrailColor();
+  reverseIdx = 0;
+});
 
 const MAX_BOUNCE_SPEED = 1200;
 
@@ -49,19 +88,21 @@ const springDrag = createSpringDragController({
 let idleTime = 0;
 
 // Map disk vertical position at bounce time to one of 5 pentatonic notes.
-// Touching the bar → 0 (lowest), touching the ceiling → 4 (highest);
-// the middle band of height (H - 2R) is split into 3 equal stripes for 1, 2, 3.
+// With the bar at the top acting as ceiling: touching the bar → 4 (highest),
+// touching the floor (canvas bottom) → 0 (lowest); the middle band of height
+// (H - 2R) is split into 3 equal stripes for 3, 2, 1 from top to bottom.
 function noteFromY(){
-  const physY = bar.y - disk.y; // height of disk center above the bar
-  const H = bar.y;
+  const ceilingY = bar.y + bar.height;          // disk's effective ceiling
+  const physY = disk.y - ceilingY;              // depth of disk center below the bar
+  const H = canvas.height - ceilingY;           // available vertical space below the bar
   const R = disk.r;
   const eps = 0.5;
-  if(physY <= R + eps) return 0;
-  if(physY >= H - R - eps) return 4;
-  const t = (physY - R - eps) / (H - 2*R - 2*eps); // 0..1 across middle band
-  if(t < 1/3) return 1;
+  if(physY <= R + eps) return 4;                // just below the bar → highest
+  if(physY >= H - R - eps) return 0;            // just above the floor → lowest
+  const t = (physY - R - eps) / (H - 2*R - 2*eps); // 0..1, top→bottom of middle band
+  if(t < 1/3) return 3;
   if(t < 2/3) return 2;
-  return 3;
+  return 1;
 }
 
 export function update(dt){
@@ -104,12 +145,15 @@ export function update(dt){
   let bounced = false, bounceSpeed = 0;
   if(disk.x - disk.r < 0){ disk.x = disk.r; bounceSpeed = Math.max(bounceSpeed, Math.abs(disk.vx)); disk.vx *= -params.bounce; bounced = true; }
   if(disk.x + disk.r > W){ disk.x = W - disk.r; bounceSpeed = Math.max(bounceSpeed, Math.abs(disk.vx)); disk.vx *= -params.bounce; bounced = true; }
-  if(disk.y - disk.r < 0){ disk.y = disk.r; bounceSpeed = Math.max(bounceSpeed, Math.abs(disk.vy)); disk.vy *= -params.bounce; bounced = true; }
-  // bar collision: disk bounces off bar top with relative velocity
-  if(disk.y + disk.r > bar.y){
-    disk.y = bar.y - disk.r;
+  // floor collision: disk bounces off canvas bottom
+  if(disk.y + disk.r > H){ disk.y = H - disk.r; bounceSpeed = Math.max(bounceSpeed, Math.abs(disk.vy)); disk.vy *= -params.bounce; bounced = true; }
+  // bar collision: disk bounces off bar bottom (the bar is the ceiling)
+  // with relative velocity. Bar moving down (bar.vy > 0) pushes the disk down harder.
+  const ceilingY = bar.y + bar.height;
+  if(disk.y - disk.r < ceilingY){
+    disk.y = ceilingY + disk.r;
     bounceSpeed = Math.max(bounceSpeed, Math.abs(disk.vy));
-    disk.vy = -Math.abs(disk.vy) * params.bounce + 2 * bar.vy;
+    disk.vy = Math.abs(disk.vy) * params.bounce + 2 * bar.vy;
     bounced = true;
   }
   if(bounced){

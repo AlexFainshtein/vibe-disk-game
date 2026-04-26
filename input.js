@@ -1,5 +1,5 @@
 import { canvas, inputHooks } from './state.js';
-import { disk, bar, clickMarker, diskHistory, anchor } from './playfield.js';
+import { disk, bar, clickMarker, diskHistory, anchor, clampBarY } from './playfield.js';
 import { playGrab, playRelease } from './sound.js';
 
 function eventPos(e){
@@ -13,9 +13,17 @@ function distance(a,b){
 
 function clampAnchor(x, y){
   const margin = disk.r + 0.5;
+  let yMin, yMax;
+  if(bar.layout === 'top'){
+    yMin = bar.y + bar.height + margin; // just below the bar (the ceiling)
+    yMax = canvas.height - margin;       // just above the floor
+  } else {
+    yMin = margin;                        // just below the canvas top
+    yMax = bar.y - margin;                // just above the bar (the floor)
+  }
   return {
     x: Math.max(margin, Math.min(canvas.width - margin, x)),
-    y: Math.max(margin, Math.min(bar.y - margin, y))
+    y: Math.max(yMin, Math.min(yMax, y))
   };
 }
 
@@ -79,9 +87,7 @@ export function setupInput(){
   canvas.addEventListener('pointermove', (ev)=>{
     const p = eventPos(ev);
     if(bar.dragging){
-      const minBarY = disk.r * 2;
-      let newBarY = p.y + barGrabOffset;
-      bar.y = Math.max(minBarY, Math.min(canvas.height - bar.height, newBarY));
+      bar.y = clampBarY(p.y + barGrabOffset);
 
       // auto-release if pointer leaves the bar due to clamping
       if(p.y < bar.y || p.y > bar.y + bar.height){

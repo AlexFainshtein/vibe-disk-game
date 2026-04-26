@@ -12,8 +12,8 @@ const BAR_HEIGHT_FRACTION = 1/22;          // fraction of canvas height
 
 const initialBarHeight = canvas.height * BAR_HEIGHT_FRACTION;
 const initialBarY = document.body.dataset.player === 'eugene'
-  ? canvas.height - initialBarHeight
-  : canvas.height * 0.85;
+  ? canvas.height - initialBarHeight   // Eugene: bar at the bottom (acts as floor)
+  : 0;                                  // Alex:   bar at the top    (acts as ceiling)
 
 export const disk = {
   x: canvas.width/2,
@@ -31,8 +31,24 @@ export const bar = {
   vy: 0,
   height: initialBarHeight,
   color: '#88aacc',
-  dragging: false
+  dragging: false,
+  // Layout determines which side of the bar the disk lives on (and therefore
+  // how the bar-drag clamp works). Default 'bottom' = disk above bar (Eugene
+  // style); variants set this to 'top' (Alex style) at module load.
+  layout: 'bottom'
 };
+
+// Clamp a candidate bar.y to the legal range for the current layout.
+// 'bottom' layout (Eugene): disk lives above bar -> leave 2*disk.r above the bar.
+// 'top'    layout (Alex):   disk lives below bar -> leave 2*disk.r below the bar.
+export function clampBarY(newBarY){
+  if(bar.layout === 'top'){
+    const maxBarY = canvas.height - bar.height - disk.r * 2;
+    return Math.max(0, Math.min(maxBarY, newBarY));
+  }
+  const minBarY = disk.r * 2;
+  return Math.max(minBarY, Math.min(canvas.height - bar.height, newBarY));
+}
 
 // spring anchor: the point the disk is pulled toward
 export const anchor = {
@@ -62,6 +78,10 @@ window.addEventListener('resize', ()=>{
   bar.height = canvas.height * BAR_HEIGHT_FRACTION;
   if(document.body.dataset.player === 'eugene'){
     bar.y = canvas.height - bar.height;
+    bar.prevY = bar.y;
+  } else {
+    // re-clamp the user-dragged bar position in case resize made it invalid
+    bar.y = clampBarY(bar.y);
     bar.prevY = bar.y;
   }
 }, {passive:true});

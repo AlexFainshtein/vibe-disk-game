@@ -39,11 +39,13 @@ export function initControls(){
   const resetBtn = document.getElementById('resetDisk');
   resetBtn.addEventListener('pointerdown', (e)=> e.stopPropagation());
   resetBtn.addEventListener('click', ()=>{
-    bar.y = document.body.dataset.player === 'eugene' ? canvas.height - bar.height : canvas.height * 0.85;
+    const eugene = document.body.dataset.player === 'eugene';
+    bar.y = eugene ? canvas.height - bar.height : 0;
     bar.prevY = bar.y;
     bar.vy = 0;
     disk.x = canvas.width / 2;
-    disk.y = (bar.y - disk.r) / 2;
+    // Center the disk in the playable area for the active layout.
+    disk.y = eugene ? (bar.y - disk.r) / 2 : (bar.y + bar.height + canvas.height) / 2;
     disk.vx = 0;
     disk.vy = 0;
   });
