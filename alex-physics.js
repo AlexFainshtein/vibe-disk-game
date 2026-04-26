@@ -1,4 +1,5 @@
-import { canvas, params, disk, bar, anchor } from './state.js';
+import { canvas, params } from './state.js';
+import { disk, bar, anchor } from './playfield.js';
 import { playKnock, playChime } from './sound.js';
 import { tickTargets } from './alex-targets.js';
 import { tickBumper } from './alex-bumper.js';

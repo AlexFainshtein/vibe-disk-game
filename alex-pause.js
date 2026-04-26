@@ -1,4 +1,4 @@
-import { disk } from './state.js';
+import { disk } from './playfield.js';
 
 // Pause/Resume button (Alex variant only). Pause saves the disk's current velocity and zeros it,
 // so the disk freezes mid-flight. Resume restores the saved velocity. If the user grabs the disk

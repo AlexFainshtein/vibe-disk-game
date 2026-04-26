@@ -1,4 +1,5 @@
-import { canvas, disk, params, renderExtras, inputHooks } from './state.js';
+import { canvas, params, renderExtras, inputHooks } from './state.js';
+import { disk } from './playfield.js';
 import { playKnock } from './sound.js';
 
 // Bumper radius is a fraction of the shorter canvas dimension so it stays right-sized across phones / orientations.

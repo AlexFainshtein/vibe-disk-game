@@ -1,3 +1,8 @@
+// Engine-only shared state. Owns the canvas + ctx + render/input extension points
+// shared by every game variant. Variant-specific entities (disk, bar, anchor, bricks,
+// mallet, etc.) live in playfield.js and per-variant feature modules and self-register
+// onto the hook arrays here.
+
 export const canvas = document.getElementById('game');
 export const ctx = canvas.getContext('2d');
 
@@ -6,6 +11,7 @@ function resizeCanvas(){
   canvas.height = window.innerHeight;
 }
 resizeCanvas();
+window.addEventListener('resize', resizeCanvas, {passive:true});
 
 export const screen = {
   current: document.body.dataset.player ?? 'alex',
@@ -22,114 +28,6 @@ export const params = {
   frameMultiplier: 1,
   bounce: 1
 };
-
-// Disk radius is a fraction of the shorter canvas dimension so it stays right-sized across phones / orientations.
-export const DISK_RADIUS_FRACTION = 1/10;
-
-export const disk = {
-  x: canvas.width/2,
-  y: canvas.height/2,
-  r: Math.min(canvas.width, canvas.height) * DISK_RADIUS_FRACTION,
-  vx: 0,
-  vy: 0,
-  color: '#ffb86b',
-  glass: false
-};
-
-// Bar thickness is a fraction of the canvas height so it stays right-sized across phones.
-const BAR_HEIGHT_FRACTION = 1/22;
-const initialBarHeight = canvas.height * BAR_HEIGHT_FRACTION;
-const initialBarY = document.body.dataset.player === 'eugene'
-  ? canvas.height - initialBarHeight
-  : canvas.height * 0.85;
-
-export const bar = {
-  y: initialBarY,
-  prevY: initialBarY,
-  vy: 0,
-  height: initialBarHeight,
-  color: '#88aacc',
-  dragging: false
-};
-
-window.addEventListener('resize', ()=>{
-  resizeCanvas();
-  disk.r = Math.min(canvas.width, canvas.height) * DISK_RADIUS_FRACTION;
-  bar.height = canvas.height * BAR_HEIGHT_FRACTION;
-  if(document.body.dataset.player === 'eugene'){
-    bar.y = canvas.height - bar.height;
-    bar.prevY = bar.y;
-  }
-}, {passive:true});
-
-export const input = {
-  dragging: false,
-  mouseBuf: [] // {x,y,t}
-};
-
-// spring anchor: the point the disk is pulled toward
-export const anchor = {
-  active: false,
-  x: 0,
-  y: 0,
-  prevX: 0,
-  prevY: 0
-};
-
-// debug: hit detection state
-export const clickMarker = {
-  active: false,
-  hit: false
-};
-
-export const bricks = [];
-export function initBricks(){
-  bricks.length = 0;
-  if(document.body.dataset.player !== 'eugene') return;
-  const cols = 7, rows = 4;
-  const gap = 5;
-  const brickW = (canvas.width - gap * (cols + 1)) / cols;
-  const brickH = 20;
-  const startY = 120;
-  const rowColors = ['#7a1a3a','#6b1a45','#5c1a50','#4d1a5b'];
-  for(let r = 0; r < rows; r++){
-    for(let c = 2; c < cols; c++){
-      bricks.push({
-        x: gap + c * (brickW + gap),
-        y: startY + r * (brickH + gap),
-        w: brickW,
-        h: brickH,
-        alive: true,
-        color: rowColors[r]
-      });
-    }
-  }
-}
-
-// bubble pop animation state
-export const bubblePop = {
-  active: false,
-  x: 0, y: 0,
-  t: 0,
-  duration: 0.45,
-  particles: [] // [{ax, ay}] unit-ish direction vectors
-};
-
-// air-hockey mallet: appears on a tap-miss, follows the finger, deflects the disk
-export const mallet = {
-  active: false,
-  x: 0, y: 0,
-  prevX: 0, prevY: 0,
-  vx: 0, vy: 0
-};
-
-// recent disk positions for lag-compensated hit detection
-const HISTORY_SIZE = 5;
-export const diskHistory = [];
-export function recordDiskPosition(){
-  diskHistory.push({x: disk.x, y: disk.y});
-  if(diskHistory.length > HISTORY_SIZE) diskHistory.shift();
-}
 
 // render extension points: feature modules push (ctx) => void callbacks here.
 // render.js calls them after the bar and before the disk so extras sit in the playfield, behind the disk.

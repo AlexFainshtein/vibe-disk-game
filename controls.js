@@ -1,4 +1,5 @@
-import { canvas, disk, bar, screen, initBricks } from './state.js';
+import { canvas, screen } from './state.js';
+import { disk, bar } from './playfield.js';
 
 export function initControls(){
   const altFriction = document.getElementById('altFriction');
@@ -32,6 +33,9 @@ export function initControls(){
     });
   }
 
+  // Reset resets the playfield primitives (disk + bar). Variant features that want
+  // to react to Reset (alex-bumper clearing, eugene-bricks regenerating) subscribe
+  // their own listeners directly to this button — controls.js doesn't dispatch.
   const resetBtn = document.getElementById('resetDisk');
   resetBtn.addEventListener('pointerdown', (e)=> e.stopPropagation());
   resetBtn.addEventListener('click', ()=>{
@@ -42,7 +46,6 @@ export function initControls(){
     disk.y = (bar.y - disk.r) / 2;
     disk.vx = 0;
     disk.vy = 0;
-    initBricks();
   });
 
   const btnAlex = document.getElementById('btnAlex');

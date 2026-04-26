@@ -1,4 +1,5 @@
-import { canvas, disk, bar, renderExtras } from './state.js';
+import { canvas, renderExtras } from './state.js';
+import { disk, bar } from './playfield.js';
 import { playChime } from './sound.js';
 
 const NUM_TARGETS = 5;

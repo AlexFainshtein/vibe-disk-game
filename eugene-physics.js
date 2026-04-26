@@ -1,8 +1,30 @@
-import { canvas, params, disk, bar, anchor, bricks, mallet, initBricks, bubblePop } from './state.js';
+import { canvas, params, renderExtras } from './state.js';
+import { disk, bar, anchor } from './playfield.js';
+import { bricks, initBricks, bubblePop } from './eugene-bricks.js';
+import { mallet, tickMallet } from './eugene-mallet.js';
 import { playKnock, playFanfare, playDing, playShatter } from './sound.js';
 
+// Visual feedback for the spring controller — a green line + dot from anchor to
+// disk center. Lives here (not render.js) because it's Eugene-specific; render.js
+// is now variant-agnostic.
+function drawSpringLine(c){
+  if(!anchor.active) return;
+  c.beginPath();
+  c.moveTo(anchor.x, anchor.y);
+  c.lineTo(disk.x, disk.y);
+  c.strokeStyle = '#00ff00';
+  c.lineWidth = 2;
+  c.stroke();
+  c.beginPath();
+  c.arc(anchor.x, anchor.y, 5, 0, Math.PI*2);
+  c.fillStyle = '#00ff00';
+  c.fill();
+}
+if(document.body.dataset.player === 'eugene'){
+  renderExtras.push(drawSpringLine);
+}
+
 const MAX_BOUNCE_SPEED = 1200;
-const MALLET_RESTITUTION = 0.5; // <1 absorbs energy on mallet hits
 
 const SUBSTEPS        = 4;           // sub-steps per frame for spring stability
 const SPRING_K        = 800;         // default: spring stiffness
@@ -17,37 +39,6 @@ const ALT_DAMP_TANGENTIAL = ALT_SPRING_K/10; // alt friction: damping along tang
 
 const altFrictionEl   = document.getElementById('altFriction');
 const quadSpringEl    = document.getElementById('quadSpring');
-
-function resolveMalletCollision(dt){
-  if(!mallet.active) return;
-
-  // velocity from position delta this frame
-  mallet.vx = (mallet.x - mallet.prevX) / dt;
-  mallet.vy = (mallet.y - mallet.prevY) / dt;
-  mallet.prevX = mallet.x;
-  mallet.prevY = mallet.y;
-
-  const dx = disk.x - mallet.x;
-  const dy = disk.y - mallet.y;
-  const dist = Math.hypot(dx, dy);
-  const minDist = disk.r * 2;
-  if(dist >= minDist || dist < 1e-6) return;
-
-  // collision normal pointing from mallet center toward disk center
-  const nx = dx / dist, ny = dy / dist;
-
-  // push disk out of overlap
-  disk.x = mallet.x + nx * minDist;
-  disk.y = mallet.y + ny * minDist;
-
-  // relative normal velocity — mallet treated as infinite mass
-  const relVn = (disk.vx - mallet.vx) * nx + (disk.vy - mallet.vy) * ny;
-  if(relVn >= 0) return; // already separating
-
-  disk.vx -= (1 + MALLET_RESTITUTION) * relVn * nx;
-  disk.vy -= (1 + MALLET_RESTITUTION) * relVn * ny;
-  playKnock(Math.min(Math.abs(relVn) / 1200, 1));
-}
 
 function anyBrickHit(x, y, r, bricks){
   const r2 = r * r;
@@ -214,7 +205,7 @@ export function update(dt){
   }
   if(bounced) playKnock(Math.min(bounceSpeed / MAX_BOUNCE_SPEED, 1));
   if(hitBar && !disk.glass){ disk.glass = true; playDing(); }
-  resolveMalletCollision(dt);
+  tickMallet(dt);
 
   if(bubblePop.active){
     bubblePop.t += dt;

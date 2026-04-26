@@ -1,4 +1,5 @@
-import { canvas, disk, recordDiskPosition, initBricks } from './state.js';
+import { canvas } from './state.js';
+import { disk, recordDiskPosition } from './playfield.js';
 import { draw } from './render.js';
 import { setupInput } from './input.js';
 import { initControls } from './controls.js';
@@ -22,7 +23,6 @@ function loop(t){
 window.addEventListener('load', ()=>{
   disk.x = canvas.width/2;
   disk.y = canvas.height/2;
-  initBricks();
 });
 
 setupInput();

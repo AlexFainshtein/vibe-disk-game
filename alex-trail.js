@@ -1,4 +1,5 @@
-import { disk, renderExtras } from './state.js';
+import { renderExtras } from './state.js';
+import { disk } from './playfield.js';
 
 const TRAIL_COLOR = 'rgba(255, 255, 255, 0.28)';
 const TRAIL_WIDTH = 1.5;
