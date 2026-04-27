@@ -1,17 +1,18 @@
-import { canvas, params, renderExtras, inputHooks } from './state.js';
+import { canvas, renderExtras, inputHooks } from './state.js';
 import { disk } from './playfield.js';
-import { playKnock } from './sound.js';
 
 // Bumper radius is a fraction of the shorter canvas dimension so it stays right-sized across phones / orientations.
 const BUMPER_RADIUS_FRACTION = 1/6;
 const BUMPER_COLOR = '#3a4a66';  // dark slate — same hue as the bar so disk-affecting "furniture" reads as one visual group
-const MAX_BOUNCE_SPEED = 1200;   // matches alex-physics.js for consistent knock intensity
 
 function computeBumperRadius(){
   return Math.min(canvas.width, canvas.height) * BUMPER_RADIUS_FRACTION;
 }
 
-const bumper = {
+// Exported so alex-physics can read geometry for time-of-impact (TOI) collision
+// detection. The collision math itself lives there; this module owns the data,
+// the user-input lifecycle (place/remove), event flags, and rendering.
+export const bumper = {
   active: false,
   x: 0,
   y: 0,
@@ -83,27 +84,9 @@ function init(){
   renderExtras.push(drawBumper);
 }
 
-function checkCollision(){
-  if(!bumper.active) return;
-  const dx = disk.x - bumper.x;
-  const dy = disk.y - bumper.y;
-  const dist = Math.hypot(dx, dy);
-  const minDist = disk.r + bumper.r;
-  if(dist >= minDist || dist <= 0) return;
-
-  const nx = dx / dist;
-  const ny = dy / dist;
-  // push the disk out along the normal so it just touches the bumper
-  disk.x = bumper.x + nx * minDist;
-  disk.y = bumper.y + ny * minDist;
-  // reflect velocity along the normal only if the disk was approaching
-  const vDotN = disk.vx * nx + disk.vy * ny;
-  if(vDotN >= 0) return;
-  const factor = (1 + params.bounce) * vDotN;
-  disk.vx -= factor * nx;
-  disk.vy -= factor * ny;
-  const intensity = Math.min(Math.abs(vDotN) / MAX_BOUNCE_SPEED, 1);
-  playKnock(intensity);
+// Called by alex-physics whenever it detects a disk-bumper collision (via TOI).
+// Updates internal flags so tickBumper() can report firstHit / removedAfterHit.
+export function notifyBumperHit(){
   hitDuringThisPlacement = true;
   if(firstHitPending){
     firstHitPending = false;
@@ -113,7 +96,6 @@ function checkCollision(){
 
 export function tickBumper(){
   if(!initialized) init();
-  checkCollision();
   const events = {
     firstHit:        firstHitSinceLastTick,
     placed:          placedSinceLastTick,

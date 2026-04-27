@@ -40,7 +40,7 @@ export function initControls(){
   resetBtn.addEventListener('pointerdown', (e)=> e.stopPropagation());
   resetBtn.addEventListener('click', ()=>{
     const eugene = document.body.dataset.player === 'eugene';
-    bar.y = eugene ? canvas.height - bar.height : 0;
+    bar.y = eugene ? canvas.height - bar.height : bar.height;
     bar.prevY = bar.y;
     bar.vy = 0;
     disk.x = canvas.width / 2;

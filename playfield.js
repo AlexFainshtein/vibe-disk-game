@@ -13,7 +13,8 @@ const BAR_HEIGHT_FRACTION = 1/22;          // fraction of canvas height
 const initialBarHeight = canvas.height * BAR_HEIGHT_FRACTION;
 const initialBarY = document.body.dataset.player === 'eugene'
   ? canvas.height - initialBarHeight   // Eugene: bar at the bottom (acts as floor)
-  : 0;                                  // Alex:   bar at the top    (acts as ceiling)
+  : initialBarHeight;                   // Alex:   inset one bar-height from the top so it
+                                        //         reads as a floating object, not screen chrome
 
 export const disk = {
   x: canvas.width/2,
