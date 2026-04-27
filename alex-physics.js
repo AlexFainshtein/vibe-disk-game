@@ -33,29 +33,42 @@ function drawSpringLine(c){
 }
 renderExtras.push(drawSpringLine);
 
-// EXPERIMENT (throwaway): press R to negate the disk's velocity and start a
-// new trail in a contrasting color. Lets us watch the disk retrace its path
-// in reverse and see how quickly the two trails diverge from rounding errors.
-// Successive presses cycle through a small palette so multiple reversals are
-// visually distinct. Reset restores the default white and rewinds the cycle.
-// Remove this block + the setTrailColor/resetTrailColor imports + per-segment
-// color support in alex-trail.js if not adopted.
-const REVERSE_COLORS = [
-  'rgba(255, 90, 200, 0.60)',  // magenta
-  'rgba(120, 230, 255, 0.60)', // cyan
-  'rgba(255, 220, 80, 0.60)',  // gold
-];
-let reverseIdx = 0;
+// EXPERIMENT (throwaway): press R (or tap the Reverse button) to negate the
+// disk's velocity. Reverse mode toggles each press: odd presses paint the
+// trail in the (flat) BACKGROUND COLOR with full alpha — wherever the reverse
+// path crosses an existing forward stroke, the opaque background paint covers
+// the white, effectively *erasing* it. Even presses (the disk is back in its
+// original direction) restore the normal forward white trail. Reverse stroke
+// is slightly wider than forward so its antialiased edge fully blankets the
+// forward edge — without this, a hairline white halo of antialiased pixels
+// remains on the laptop (less visible on phones).
+//
+// Depends on a flat background — see state.js → screen.backgrounds.alex.
+//
+// To restore the colorful version (per-pass cycling magenta/cyan/gold with
+// normal compositing), replace doReverse() with the COLOR-CYCLE block below.
+const REVERSE_TRAIL_COLOR = '#071018'; // matches the (flat) background in state.js
+const REVERSE_TRAIL_WIDTH = 3;          // wider than the forward 1.5 px to cover antialiased edges
+let reverseToggleOn = false;
 function doReverse(){
   disk.vx = -disk.vx;
   disk.vy = -disk.vy;
-  setTrailColor(REVERSE_COLORS[reverseIdx]);
+  reverseToggleOn = !reverseToggleOn;
+  if(reverseToggleOn) setTrailColor(REVERSE_TRAIL_COLOR, 'source-over', REVERSE_TRAIL_WIDTH);
+  else                resetTrailColor();
   // Seed the new segment at the disk's current position so the new trail
   // visually joins the end of the previous one (otherwise its first point
   // would be one integration step away in the reversed direction).
   tickTrail();
-  reverseIdx = (reverseIdx + 1) % REVERSE_COLORS.length;
 }
+// COLOR-CYCLE alternative (preserved for easy restoration):
+// const REVERSE_COLORS = ['rgba(255,90,200,0.60)','rgba(120,230,255,0.60)','rgba(255,220,80,0.60)'];
+// let reverseIdx = 0;
+// function doReverse(){
+//   disk.vx = -disk.vx; disk.vy = -disk.vy;
+//   setTrailColor(REVERSE_COLORS[reverseIdx]); tickTrail();
+//   reverseIdx = (reverseIdx + 1) % REVERSE_COLORS.length;
+// }
 window.addEventListener('keydown', (e) => {
   if(e.key === 'r' || e.key === 'R') doReverse();
 });
@@ -64,7 +77,7 @@ reverseBtn?.addEventListener('pointerdown', (e) => e.stopPropagation()); // don'
 reverseBtn?.addEventListener('click', doReverse);
 document.getElementById('resetDisk')?.addEventListener('click', () => {
   resetTrailColor();
-  reverseIdx = 0;
+  reverseToggleOn = false;
 });
 
 // Fade the "Wiggle the disk." hint after the first canvas pointerdown.
