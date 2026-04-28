@@ -43,13 +43,14 @@ export function setupInput(){
     if(document.body.dataset.player === 'eugene'){
       // Eugene: every tap spawns/moves the mallet — no spring-anchor grab.
       const malletR = Math.min(canvas.width, canvas.height) * MALLET_RADIUS_FRACTION;
-      const distToDisk = Math.hypot(disk.x - p.x, disk.y - p.y);
+      const cx = p.x, cy = p.y - malletR; // center offset so bottom rim is under finger
+      const distToDisk = Math.hypot(disk.x - cx, disk.y - cy);
       mallet.active = true;
       mallet.r = malletR;
-      mallet.x = p.x;
-      mallet.y = p.y;
-      mallet.prevX = p.x;
-      mallet.prevY = p.y;
+      mallet.x = cx;
+      mallet.y = cy;
+      mallet.prevX = cx;
+      mallet.prevY = cy;
       mallet.vx = 0;
       mallet.vy = 0;
       // ball inside the shell when spawned → inside mode; otherwise outside
@@ -102,7 +103,7 @@ export function setupInput(){
       mallet.prevX = mallet.x;
       mallet.prevY = mallet.y;
       mallet.x = p.x;
-      mallet.y = p.y;
+      mallet.y = p.y - mallet.r;
     }
     if(bar.dragging){
       const minBarY = disk.r * 2;
