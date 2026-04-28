@@ -7,7 +7,10 @@ import { canvas } from './state.js';
 // state.js owns the canvas resize itself (loaded first because we import from it),
 // so by the time this module's resize listener fires, canvas.width/height are current.
 
-export const DISK_RADIUS_FRACTION = 1/10; // fraction of the shorter canvas dimension
+// Disk radius is a fraction of the shorter canvas dimension. `let` so variants
+// can override at module load (e.g., Eugene's hollow-mallet variant uses a
+// much smaller disk; see setDiskRadiusFraction below).
+export let DISK_RADIUS_FRACTION = 1/10;
 const BAR_HEIGHT_FRACTION = 1/22;          // fraction of canvas height
 
 const initialBarHeight = canvas.height * BAR_HEIGHT_FRACTION;
@@ -38,6 +41,15 @@ export const bar = {
   // style); variants set this to 'top' (Alex style) at module load.
   layout: 'bottom'
 };
+
+// Variants can override the disk radius fraction at module load. Updates
+// disk.r immediately so the new size takes effect this frame; the resize
+// listener below uses the current value of DISK_RADIUS_FRACTION on every
+// resize so subsequent recomputations also pick up the override.
+export function setDiskRadiusFraction(frac){
+  DISK_RADIUS_FRACTION = frac;
+  disk.r = Math.min(canvas.width, canvas.height) * frac;
+}
 
 // Clamp a candidate bar.y to the legal range for the current layout.
 // 'bottom' layout (Eugene): disk lives above bar -> leave 2*disk.r above the bar.

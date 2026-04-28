@@ -1,63 +1,85 @@
-import { renderExtras, inputHooks } from './state.js';
+import { canvas, renderExtras, inputHooks } from './state.js';
 import { disk } from './playfield.js';
 import { playKnock } from './sound.js';
 
-// Eugene-only feature: tap empty space to spawn an air-hockey mallet that follows
-// the finger; the mallet deflects the disk on overlap with restitution < 1.
+// Eugene-only feature: tap empty space to spawn a hollow-shell mallet that
+// follows the finger. The mallet has TWO modes determined at spawn time by
+// whether the disk was inside or outside the shell:
+//   'outside' — disk outside; the mallet bounces it AWAY (off the outer rim),
+//               moderate restitution.
+//   'inside'  — disk inside; the mallet TRAPS it (it bounces off the inner
+//               wall), heavy damping (very inelastic).
 //
-// Self-registers a render hook + input hooks (emptyDown/emptyMove/emptyUp) at
-// module load. eugene-physics.js calls tickMallet(dt) each frame to resolve the
-// mallet→disk collision.
+// The finger touches the BOTTOM RIM of the shell (not its center) — feels
+// more natural when sweeping the mallet around, especially on phone.
+//
+// Self-registers a render hook + input hooks at module load. eugene-physics.js
+// calls tickMallet(dt) each frame to resolve the mallet→disk collision.
 
-const MALLET_RESTITUTION = 0.5; // <1 absorbs energy on mallet hits
+// Mallet radius is 3× the disk radius (in the same shorter-canvas-dimension units).
+// Per eugene-physics, Eugene's variant calls setDiskRadiusFraction(1/40), so this
+// gives MALLET ≈ 9/40 of the shorter canvas dimension.
+export const MALLET_RADIUS_FRACTION = (1/40) * 9;
+
+const MALLET_RESTITUTION       = 0.5; // outer shell: moderate bounce
+const MALLET_INNER_RESTITUTION = 0.1; // inner shell: heavy damping
 const MAX_KNOCK_SPEED = 1200;
 
 export const mallet = {
   active: false,
   x: 0, y: 0,
   prevX: 0, prevY: 0,
-  vx: 0, vy: 0
+  vx: 0, vy: 0,
+  r: 0,            // set on spawn from MALLET_RADIUS_FRACTION × shorter canvas dim
+  mode: 'outside'  // 'outside' | 'inside' — set at spawn based on disk position
 };
 
 function drawMallet(c){
   if(!mallet.active) return;
+  const shellR = mallet.r;
+  const strokeW = Math.max(4, shellR * 0.12);
   c.beginPath();
-  c.arc(mallet.x, mallet.y, disk.r, 0, Math.PI * 2);
-  c.fillStyle = 'rgba(200,200,200,0.75)';
-  c.fill();
-  // thick inset outline — drawn at reduced radius so stroke stays inside
-  const strokeW = 10;
-  c.beginPath();
-  c.arc(mallet.x, mallet.y, disk.r - strokeW / 2, 0, Math.PI * 2);
-  c.strokeStyle = 'rgba(255,255,255,0.85)';
+  c.arc(mallet.x, mallet.y, shellR, 0, Math.PI * 2);
+  c.strokeStyle = mallet.mode === 'inside'
+    ? 'rgba(255,180,80,0.85)'   // warm amber when ball is trapped inside
+    : 'rgba(160,220,255,0.85)'; // cool blue when ball is outside
   c.lineWidth = strokeW;
   c.stroke();
-  // center dot
-  c.beginPath();
-  c.arc(mallet.x, mallet.y, 5, 0, Math.PI * 2);
-  c.fillStyle = 'rgba(255,255,255,0.7)';
-  c.fill();
 }
 
 // This file is only loaded on Eugene's page (main.js dynamically imports the active
 // physics module). No need to guard the registrations on player.
 renderExtras.push(drawMallet);
 
+function malletRadius(){
+  return Math.min(canvas.width, canvas.height) * MALLET_RADIUS_FRACTION;
+}
+
+// Spawn / reposition the mallet at the touch position. The shell's center is
+// placed `mallet.r` above the touch point so the bottom rim sits under the
+// finger (feels natural when dragging the mallet around).
 inputHooks.emptyDown = (x, y) => {
-  mallet.active = true;
-  mallet.x = x;
-  mallet.y = y;
-  mallet.prevX = x;
-  mallet.prevY = y;
+  const r = malletRadius();
+  const cx = x;
+  const cy = y - r; // center offset so bottom rim is under finger
+  mallet.r = r;
+  mallet.x = cx;
+  mallet.y = cy;
+  mallet.prevX = cx;
+  mallet.prevY = cy;
   mallet.vx = 0;
   mallet.vy = 0;
+  // Disk inside the shell at spawn → 'inside' mode (trap); else → 'outside'.
+  const distToDisk = Math.hypot(disk.x - cx, disk.y - cy);
+  mallet.mode = distToDisk < r - disk.r ? 'inside' : 'outside';
+  mallet.active = true;
   return true; // capture pointer for subsequent move/up
 };
 inputHooks.emptyMove = (x, y) => {
   mallet.prevX = mallet.x;
   mallet.prevY = mallet.y;
   mallet.x = x;
-  mallet.y = y;
+  mallet.y = y - mallet.r; // keep bottom rim under finger
 };
 inputHooks.emptyUp = () => {
   mallet.active = false;
@@ -74,22 +96,39 @@ export function tickMallet(dt){
 
   const dx = disk.x - mallet.x;
   const dy = disk.y - mallet.y;
-  const dist = Math.hypot(dx, dy);
-  const minDist = disk.r * 2;
-  if(dist >= minDist || dist < 1e-6) return;
+  const dist = Math.hypot(dx, dy) || 1e-6;
+  const nx = dx / dist, ny = dy / dist; // outward normal from mallet center
+  const shellR = mallet.r;
 
-  // collision normal pointing from mallet center toward disk center
-  const nx = dx / dist, ny = dy / dist;
-
-  // push disk out of overlap
-  disk.x = mallet.x + nx * minDist;
-  disk.y = mallet.y + ny * minDist;
-
-  // relative normal velocity — mallet treated as infinite mass
-  const relVn = (disk.vx - mallet.vx) * nx + (disk.vy - mallet.vy) * ny;
-  if(relVn >= 0) return; // already separating
-
-  disk.vx -= (1 + MALLET_RESTITUTION) * relVn * nx;
-  disk.vy -= (1 + MALLET_RESTITUTION) * relVn * ny;
-  playKnock(Math.min(Math.abs(relVn) / MAX_KNOCK_SPEED, 1));
+  if(mallet.mode === 'outside'){
+    // Disk outside: bounces off the OUTER surface of the shell.
+    // Contact when disk center is within shellR + disk.r from mallet center.
+    const maxDist = shellR + disk.r;
+    if(dist > maxDist) return;
+    // push disk out (away from mallet center)
+    disk.x = mallet.x + nx * maxDist;
+    disk.y = mallet.y + ny * maxDist;
+    const relVn = (disk.vx - mallet.vx) * nx + (disk.vy - mallet.vy) * ny;
+    if(relVn >= 0) return; // already separating
+    disk.vx -= (1 + MALLET_RESTITUTION) * relVn * nx;
+    disk.vy -= (1 + MALLET_RESTITUTION) * relVn * ny;
+    disk.glass = false;
+    playKnock(Math.min(Math.abs(relVn) / MAX_KNOCK_SPEED, 1));
+  } else {
+    // Disk inside (trapped): bounces off the INNER wall of the shell.
+    // Contact when disk center is farther than shellR - disk.r from mallet center.
+    const contactR = shellR - disk.r;
+    if(dist < contactR) return;
+    // push disk inward (toward mallet center) so it sits at the inner wall
+    disk.x = mallet.x + nx * contactR;
+    disk.y = mallet.y + ny * contactR;
+    // For an inner-wall reflection, the surface normal points inward (negate nx,ny).
+    // Equivalently, we reflect when relVn > 0 (disk moving outward into the wall).
+    const relVn = (disk.vx - mallet.vx) * nx + (disk.vy - mallet.vy) * ny;
+    if(relVn <= 0) return; // already moving inward (separating from inner wall)
+    disk.vx -= (1 + MALLET_INNER_RESTITUTION) * relVn * nx;
+    disk.vy -= (1 + MALLET_INNER_RESTITUTION) * relVn * ny;
+    disk.glass = false;
+    playKnock(Math.min(Math.abs(relVn) / MAX_KNOCK_SPEED, 1));
+  }
 }

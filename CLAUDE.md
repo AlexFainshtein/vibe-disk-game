@@ -18,15 +18,24 @@ python -m http.server 8000
 
 Then open http://localhost:8000. To iterate, edit source files and refresh.
 
-## Testing on an Android phone (same Wi-Fi, with auto-reload)
+## Testing on an Android phone (USB, with auto-reload) — preferred
 
-Use `live-server` instead of `python -m http.server` to get reload-on-save:
+Connect the phone via USB with USB debugging enabled, then:
+
+```
+npx live-server --port=8000 --no-browser
+adb reverse tcp:8000 tcp:8000
+```
+
+(If PowerShell blocks `npx` with an execution-policy error, use `npx.cmd` instead.)
+
+Open `http://localhost:8000` on the phone. Edits auto-reload on the phone. Re-run `adb reverse` if the tunnel drops.
+
+## Testing on an Android phone (same Wi-Fi, with auto-reload) — alternative
 
 ```
 npx live-server --port=8000 --host=0.0.0.0
 ```
-
-(If PowerShell blocks `npx` with an execution-policy error, use `npx.cmd` instead.)
 
 Find your PC's LAN IP — run `ipconfig` and grab the IPv4 address under your Wi-Fi adapter (e.g. `192.168.1.134`; DHCP-assigned, may change between sessions). Allow Node.js through Windows Firewall on the **Private** profile when prompted, and confirm the Wi-Fi network's profile is set to Private (Public blocks LAN traffic).
 
