@@ -1,4 +1,4 @@
-import { canvas, disk, bar, clickMarker, diskHistory, anchor, inputHooks, mallet } from './state.js';
+import { canvas, disk, bar, clickMarker, diskHistory, anchor, inputHooks, mallet, MALLET_RADIUS_FRACTION } from './state.js';
 import { playGrab, playRelease } from './sound.js';
 
 function eventPos(e){
@@ -40,6 +40,24 @@ export function setupInput(){
       return;
     }
 
+    if(document.body.dataset.player === 'eugene'){
+      // Eugene: every tap spawns/moves the mallet — no spring-anchor grab.
+      const malletR = Math.min(canvas.width, canvas.height) * MALLET_RADIUS_FRACTION;
+      const distToDisk = Math.hypot(disk.x - p.x, disk.y - p.y);
+      mallet.active = true;
+      mallet.r = malletR;
+      mallet.x = p.x;
+      mallet.y = p.y;
+      mallet.prevX = p.x;
+      mallet.prevY = p.y;
+      mallet.vx = 0;
+      mallet.vy = 0;
+      // ball inside the shell when spawned → inside mode; otherwise outside
+      mallet.mode = distToDisk < malletR - disk.r ? 'inside' : 'outside';
+      canvas.setPointerCapture(ev.pointerId);
+      return;
+    }
+
     // lag-compensated hit detection: check current + recent positions
     let hit = false;
     let hitFrame = -1;
@@ -69,16 +87,6 @@ export function setupInput(){
       anchor.prevY = clamped.y;
       disk.glass = false;
       playGrab();
-      canvas.setPointerCapture(ev.pointerId);
-    } else if(document.body.dataset.player === 'eugene'){
-      // Spawn the air-hockey mallet at the tap position (Eugene's variant only).
-      mallet.active = true;
-      mallet.x = p.x;
-      mallet.y = p.y;
-      mallet.prevX = p.x;
-      mallet.prevY = p.y;
-      mallet.vx = 0;
-      mallet.vy = 0;
       canvas.setPointerCapture(ev.pointerId);
     } else if(inputHooks.emptyDown){
       emptyEngaged = inputHooks.emptyDown(p.x, p.y) === true;

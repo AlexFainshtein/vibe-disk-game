@@ -24,7 +24,7 @@ export const params = {
 };
 
 // Disk radius is a fraction of the shorter canvas dimension so it stays right-sized across phones / orientations.
-export const DISK_RADIUS_FRACTION = 1/10;
+export const DISK_RADIUS_FRACTION = 1/40;
 
 export const disk = {
   x: canvas.width/2,
@@ -115,12 +115,19 @@ export const bubblePop = {
   particles: [] // [{ax, ay}] unit-ish direction vectors
 };
 
-// air-hockey mallet: appears on a tap-miss, follows the finger, deflects the disk
+// Mallet radius is 3× the disk radius, recomputed on resize.
+export const MALLET_RADIUS_FRACTION = (1/40) * 9;
+
+// hollow-shell mallet: appears on tap, follows the finger.
+// mode 'outside' — ball was outside when spawned, bounces off inner wall of shell.
+// mode 'inside'  — ball was inside when spawned, bounces off inner wall of shell.
 export const mallet = {
   active: false,
   x: 0, y: 0,
   prevX: 0, prevY: 0,
-  vx: 0, vy: 0
+  vx: 0, vy: 0,
+  r: 0,   // set on spawn; = min(canvas.width,canvas.height) * MALLET_RADIUS_FRACTION
+  mode: 'outside' // 'outside' | 'inside'
 };
 
 // recent disk positions for lag-compensated hit detection

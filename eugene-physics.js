@@ -2,7 +2,8 @@ import { canvas, params, disk, bar, anchor, bricks, mallet, initBricks, bubblePo
 import { playKnock, playFanfare, playDing, playShatter } from './sound.js';
 
 const MAX_BOUNCE_SPEED = 1200;
-const MALLET_RESTITUTION = 0.5; // <1 absorbs energy on mallet hits
+const MALLET_RESTITUTION       = 0.5; // outer shell: moderate bounce
+const MALLET_INNER_RESTITUTION = 0.1; // inner shell: heavy damping
 
 const SUBSTEPS        = 4;           // sub-steps per frame for spring stability
 const SPRING_K        = 800;         // default: spring stiffness
@@ -29,24 +30,41 @@ function resolveMalletCollision(dt){
 
   const dx = disk.x - mallet.x;
   const dy = disk.y - mallet.y;
-  const dist = Math.hypot(dx, dy);
-  const minDist = disk.r * 2;
-  if(dist >= minDist || dist < 1e-6) return;
+  const dist = Math.hypot(dx, dy) || 1e-6;
+  const nx = dx / dist, ny = dy / dist; // outward normal from mallet center
 
-  // collision normal pointing from mallet center toward disk center
-  const nx = dx / dist, ny = dy / dist;
+  const shellR = mallet.r; // inner contact surface radius
+  const contactR = shellR - disk.r; // center-to-center distance at contact
 
-  // push disk out of overlap
-  disk.x = mallet.x + nx * minDist;
-  disk.y = mallet.y + ny * minDist;
-
-  // relative normal velocity — mallet treated as infinite mass
-  const relVn = (disk.vx - mallet.vx) * nx + (disk.vy - mallet.vy) * ny;
-  if(relVn >= 0) return; // already separating
-
-  disk.vx -= (1 + MALLET_RESTITUTION) * relVn * nx;
-  disk.vy -= (1 + MALLET_RESTITUTION) * relVn * ny;
-  playKnock(Math.min(Math.abs(relVn) / 1200, 1));
+  if(mallet.mode === 'outside'){
+    // Ball outside: bounces off the outer surface of the shell.
+    // Contact when disk center is within shellR + disk.r from mallet center.
+    const maxDist = shellR + disk.r;
+    if(dist > maxDist) return;
+    // push disk out (away from mallet center)
+    disk.x = mallet.x + nx * maxDist;
+    disk.y = mallet.y + ny * maxDist;
+    const relVn = (disk.vx - mallet.vx) * nx + (disk.vy - mallet.vy) * ny;
+    if(relVn >= 0) return;
+    disk.vx -= (1 + MALLET_RESTITUTION) * relVn * nx;
+    disk.vy -= (1 + MALLET_RESTITUTION) * relVn * ny;
+    disk.glass = false;
+    playKnock(Math.min(Math.abs(relVn) / 1200, 1));
+  } else {
+    // Ball inside: bounces off the inner wall of the shell.
+    // Contact when disk center is farther than shellR - disk.r from mallet center.
+    if(dist < contactR) return;
+    // push disk inward (toward mallet center)
+    disk.x = mallet.x + nx * contactR;
+    disk.y = mallet.y + ny * contactR;
+    // normal for inner reflection points inward (negate nx/ny)
+    const relVn = (disk.vx - mallet.vx) * nx + (disk.vy - mallet.vy) * ny;
+    if(relVn <= 0) return; // already moving inward (separating from inner wall)
+    disk.vx -= (1 + MALLET_INNER_RESTITUTION) * relVn * nx;
+    disk.vy -= (1 + MALLET_INNER_RESTITUTION) * relVn * ny;
+    disk.glass = false;
+    playKnock(Math.min(Math.abs(relVn) / 1200, 1));
+  }
 }
 
 function anyBrickHit(x, y, r, bricks){

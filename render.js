@@ -28,24 +28,17 @@ export function draw(){
   // feature-supplied extras (e.g. targets), behind the disk
   for(const fn of renderExtras) fn(ctx);
 
-  // air-hockey mallet (Eugene's variant only)
+  // hollow shell mallet (Eugene's variant only)
   if(mallet.active && screen.current === 'eugene'){
+    const shellR = mallet.r;
+    const strokeW = Math.max(4, shellR * 0.12);
     ctx.beginPath();
-    ctx.arc(mallet.x, mallet.y, disk.r, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(200,200,200,0.75)';
-    ctx.fill();
-    // thick inset outline — drawn at reduced radius so stroke stays inside
-    const strokeW = 10;
-    ctx.beginPath();
-    ctx.arc(mallet.x, mallet.y, disk.r - strokeW / 2, 0, Math.PI * 2);
-    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx.arc(mallet.x, mallet.y, shellR, 0, Math.PI * 2);
+    ctx.strokeStyle = mallet.mode === 'inside'
+      ? 'rgba(255,180,80,0.85)'   // warm amber when ball is trapped inside
+      : 'rgba(160,220,255,0.85)'; // cool blue when ball is outside
     ctx.lineWidth = strokeW;
     ctx.stroke();
-    // center dot
-    ctx.beginPath();
-    ctx.arc(mallet.x, mallet.y, 5, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(255,255,255,0.7)';
-    ctx.fill();
   }
 
   // bubble pop animation
