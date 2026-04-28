@@ -1,6 +1,6 @@
 import { canvas, renderExtras, inputHooks } from './state.js';
 import { disk } from './playfield.js';
-import { playKnock } from './sound.js';
+import { playKnock, playGulp } from './sound.js';
 
 // Eugene-only feature: tap empty space to spawn a hollow-shell mallet that
 // follows the finger. The mallet has TWO modes determined at spawn time by
@@ -73,6 +73,9 @@ inputHooks.emptyDown = (x, y) => {
   const distToDisk = Math.hypot(disk.x - cx, disk.y - cy);
   mallet.mode = distToDisk < r - disk.r ? 'inside' : 'outside';
   mallet.active = true;
+  // The gulp chirp fires every time the ring becomes warm amber (i.e., the
+  // disk becomes captured) — both spawn-around-disk and wall-passage paths.
+  if(mallet.mode === 'inside') playGulp();
   return true; // capture pointer for subsequent move/up
 };
 inputHooks.emptyMove = (x, y) => {
@@ -101,19 +104,17 @@ export function tickMallet(dt){
   const shellR = mallet.r;
 
   if(mallet.mode === 'outside'){
-    // Disk outside: bounces off the OUTER surface of the shell.
-    // Contact when disk center is within shellR + disk.r from mallet center.
-    const maxDist = shellR + disk.r;
-    if(dist > maxDist) return;
-    // push disk out (away from mallet center)
-    disk.x = mallet.x + nx * maxDist;
-    disk.y = mallet.y + ny * maxDist;
-    const relVn = (disk.vx - mallet.vx) * nx + (disk.vy - mallet.vy) * ny;
-    if(relVn >= 0) return; // already separating
-    disk.vx -= (1 + MALLET_RESTITUTION) * relVn * nx;
-    disk.vy -= (1 + MALLET_RESTITUTION) * relVn * ny;
-    disk.glass = false;
-    playKnock(Math.min(Math.abs(relVn) / MAX_KNOCK_SPEED, 1));
+    // Frictionless trap door: in 'outside' mode the wall does NOT deflect the
+    // disk. The disk passes through with full velocity, and as soon as its
+    // center crosses fully inside the shell (dist ≤ shellR − disk.r) the mode
+    // switches to 'inside' and the shell becomes a trap. While the disk is
+    // straddling the wall (shellR − disk.r < dist < shellR + disk.r) no force
+    // is applied — neither outside nor inside collision fires.
+    const contactR = shellR - disk.r;
+    if(dist <= contactR){
+      mallet.mode = 'inside';
+      playGulp();
+    }
   } else {
     // Disk inside (trapped): bounces off the INNER wall of the shell.
     // Contact when disk center is farther than shellR - disk.r from mallet center.

@@ -157,6 +157,32 @@ export function playShatter(){
   source.stop(ac.currentTime + duration + 0.02);
 }
 
+export function playGulp(){
+  const ac = getCtx();
+  if(ac.state === 'suspended') ac.resume();
+  // Descending pitch from ~450 Hz to ~70 Hz over 200 ms with a fast attack and
+  // a lowpass for a wet/throaty character — meant to evoke a swallow when the
+  // disk passes through Eugene's hollow-shell mallet wall.
+  const duration = 0.2;
+  const osc = ac.createOscillator();
+  const gain = ac.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(450, ac.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(70, ac.currentTime + duration);
+  gain.gain.setValueAtTime(0.0001, ac.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.4, ac.currentTime + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + duration);
+  const filter = ac.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.setValueAtTime(700, ac.currentTime);
+  filter.Q.setValueAtTime(3, ac.currentTime);
+  osc.connect(filter);
+  filter.connect(gain);
+  gain.connect(ac.destination);
+  osc.start(ac.currentTime);
+  osc.stop(ac.currentTime + duration + 0.02);
+}
+
 const scrapePips = [
   { freq: 180, type: 'square' },
   { freq: 220, type: 'sawtooth' },
