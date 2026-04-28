@@ -1,6 +1,7 @@
 import { canvas, renderExtras, inputHooks } from './state.js';
 import { disk } from './playfield.js';
 import { playKnock, playGulp } from './sound.js';
+import { isLeftHanded } from './eugene-handedness.js';
 
 // Eugene-only feature: tap empty space to spawn a hollow-shell mallet that
 // follows the finger. The mallet has TWO modes determined at spawn time by
@@ -19,7 +20,7 @@ import { playKnock, playGulp } from './sound.js';
 // Mallet radius is 3× the disk radius (in the same shorter-canvas-dimension units).
 // Per eugene-physics, Eugene's variant calls setDiskRadiusFraction(1/40), so this
 // gives MALLET ≈ 9/40 of the shorter canvas dimension.
-export const MALLET_RADIUS_FRACTION = (1/40) * 9;
+export const MALLET_RADIUS_FRACTION = (1/40) * 9 * 0.5;
 
 const MALLET_RESTITUTION       = 0.5; // outer shell: moderate bounce
 const MALLET_INNER_RESTITUTION = 0.1; // inner shell: heavy damping
@@ -55,13 +56,25 @@ function malletRadius(){
   return Math.min(canvas.width, canvas.height) * MALLET_RADIUS_FRACTION;
 }
 
-// Spawn / reposition the mallet at the touch position. The shell's center is
-// placed `mallet.r` above the touch point so the bottom rim sits under the
-// finger (feels natural when dragging the mallet around).
+// Returns the thumb-pivot corner for the current handedness.
+// Right-handed: bottom-right corner; left-handed: bottom-left corner.
+// The mallet center is placed along the ray from this corner through the touch
+// point, at distance mallet.r beyond the touch — so the near rim sits under
+// the finger regardless of the drag direction.
+function thumbCorner(){
+  return { x: isLeftHanded ? 0 : canvas.width, y: canvas.height * 0.95 };
+}
+
+function malletCenterFromTouch(tx, ty, r){
+  const c = thumbCorner();
+  const dx = tx - c.x, dy = ty - c.y;
+  const len = Math.hypot(dx, dy) || 1e-6;
+  return { x: tx + (dx / len) * r * 2, y: ty + (dy / len) * r * 2 };
+}
+
 inputHooks.emptyDown = (x, y) => {
   const r = malletRadius();
-  const cx = x;
-  const cy = y - r; // center offset so bottom rim is under finger
+  const { x: cx, y: cy } = malletCenterFromTouch(x, y, r);
   mallet.r = r;
   mallet.x = cx;
   mallet.y = cy;
@@ -81,8 +94,9 @@ inputHooks.emptyDown = (x, y) => {
 inputHooks.emptyMove = (x, y) => {
   mallet.prevX = mallet.x;
   mallet.prevY = mallet.y;
-  mallet.x = x;
-  mallet.y = y - mallet.r; // keep bottom rim under finger
+  const { x: cx, y: cy } = malletCenterFromTouch(x, y, mallet.r);
+  mallet.x = cx;
+  mallet.y = cy;
 };
 inputHooks.emptyUp = () => {
   mallet.active = false;
