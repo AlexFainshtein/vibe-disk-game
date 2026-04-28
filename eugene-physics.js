@@ -1,4 +1,4 @@
-import { canvas, params, renderExtras } from './state.js';
+import { canvas, params, inputHooks } from './state.js';
 import { disk, bar, anchor, setDiskRadiusFraction } from './playfield.js';
 import { bricks, initBricks, bubblePop } from './eugene-bricks.js';
 import { mallet, tickMallet } from './eugene-mallet.js';
@@ -10,40 +10,16 @@ import './eugene-handedness.js';
 // disk lets the shell feel substantial without filling the playfield. Override
 // the playfield default at module load.
 setDiskRadiusFraction(1/40);
+inputHooks.diskGrab = false; // disk grabbing / spring not used in Eugene's variant
+bar.hidden = true;
 
-// Visual feedback for the spring controller — a green line + dot from anchor to
-// disk center. Lives here (not render.js) because it's Eugene-specific; render.js
-// is now variant-agnostic.
-function drawSpringLine(c){
-  if(!anchor.active) return;
-  c.beginPath();
-  c.moveTo(anchor.x, anchor.y);
-  c.lineTo(disk.x, disk.y);
-  c.strokeStyle = '#00ff00';
-  c.lineWidth = 2;
-  c.stroke();
-  c.beginPath();
-  c.arc(anchor.x, anchor.y, 5, 0, Math.PI*2);
-  c.fillStyle = '#00ff00';
-  c.fill();
-}
-renderExtras.push(drawSpringLine);
 
 const MAX_BOUNCE_SPEED = 1200;
+const GRAVITY         = 400;   // px/s² downward
+const DRAG            = 0.3;   // speed-proportional damping fraction per second
+const BAR_BOUNCE      = 1.1;   // bar restitution > 1 adds energy on bounce
 
-const SUBSTEPS        = 4;           // sub-steps per frame for spring stability
-const SPRING_K        = 800;         // default: spring stiffness
-const SPRING_K_SQ     = 10;          // default: quadratic spring stiffness (force = k_sq * dist * displacement)
-const DAMP_RADIAL     = SPRING_K/10; // default: damping along radial direction (toward/away from finger), relative to screen
-const DAMP_TANGENTIAL = SPRING_K/10; // default: damping along tangential direction (perpendicular to finger), relative to screen
-
-const ALT_SPRING_K        = 850;              // alt friction: spring stiffness
-const ALT_SPRING_K_SQ     = 0.5;            // alt friction: quadratic spring stiffness
-const ALT_DAMP_RADIAL     = ALT_SPRING_K/10;  // alt friction: damping along radial direction (toward/away from finger), relative to finger
-const ALT_DAMP_TANGENTIAL = ALT_SPRING_K/10; // alt friction: damping along tangential direction (perpendicular to finger), relative to finger
-
-const altFrictionEl   = document.getElementById('altFriction');
-const quadSpringEl    = document.getElementById('quadSpring');
+const SUBSTEPS = 4; // sub-steps per frame for brick collision accuracy
 
 function anyBrickHit(x, y, r, bricks){
   const r2 = r * r;
@@ -58,50 +34,21 @@ function anyBrickHit(x, y, r, bricks){
 }
 
 export function update(dt){
-  // compute bar velocity from position change
-  bar.vy = (bar.y - bar.prevY) / dt;
-  bar.prevY = bar.y;
-
-  // compute anchor velocity from position change
-  const anchorVx = anchor.active ? (anchor.x - anchor.prevX) / dt : 0;
-  const anchorVy = anchor.active ? (anchor.y - anchor.prevY) / dt : 0;
-  anchor.prevX = anchor.x;
-  anchor.prevY = anchor.y;
-
   const friction = params.friction; // 0..1 fractional braking
   const frameMultiplier = params.frameMultiplier;
 
   const subDt = dt / SUBSTEPS;
-  const quadratic = quadSpringEl?.dataset.on === 'true';
   let shattered = false;
   for(let s = 0; s < SUBSTEPS && !shattered; s++){
-    // spring toward anchor
-    if(anchor.active){
-      const dx = anchor.x - disk.x;
-      const dy = anchor.y - disk.y;
-      const dist = Math.hypot(dx, dy) || 1;
-      const rx = dx / dist, ry = dy / dist;
-      const tx = -ry,       ty = rx;
-      if(altFrictionEl?.dataset.on === 'true'){
-        const relVx = disk.vx - anchorVx;
-        const relVy = disk.vy - anchorVy;
-        const radialSpeed     = relVx * rx + relVy * ry;
-        const tangentialSpeed = relVx * tx + relVy * ty;
-        const dampVx = ALT_DAMP_RADIAL * radialSpeed * rx + ALT_DAMP_TANGENTIAL * tangentialSpeed * tx;
-        const dampVy = ALT_DAMP_RADIAL * radialSpeed * ry + ALT_DAMP_TANGENTIAL * tangentialSpeed * ty;
-        const k = quadratic ? ALT_SPRING_K_SQ * dist : ALT_SPRING_K;
-        disk.vx += (k * dx - dampVx) * subDt;
-        disk.vy += (k * dy - dampVy) * subDt;
-      } else {
-        const radialSpeed     = disk.vx * rx + disk.vy * ry;
-        const tangentialSpeed = disk.vx * tx + disk.vy * ty;
-        const dampVx = DAMP_RADIAL * radialSpeed * rx + DAMP_TANGENTIAL * tangentialSpeed * tx;
-        const dampVy = DAMP_RADIAL * radialSpeed * ry + DAMP_TANGENTIAL * tangentialSpeed * ty;
-        const k = quadratic ? SPRING_K_SQ * dist : SPRING_K;
-        disk.vx += (k * dx - dampVx) * subDt;
-        disk.vy += (k * dy - dampVy) * subDt;
-      }
+    // gravity + speed-proportional drag (always, even during spring)
+    disk.vy += GRAVITY * subDt;
+    const spd = Math.hypot(disk.vx, disk.vy);
+    if(spd > 1e-6){
+      const dragScale = Math.max(0, 1 - DRAG * subDt * frameMultiplier);
+      disk.vx *= dragScale;
+      disk.vy *= dragScale;
     }
+
     // integrate position; bisect to first brick contact if needed; at most 1 brick per substep
     const px = disk.x, py = disk.y;
     disk.x += disk.vx * subDt;
@@ -178,38 +125,15 @@ export function update(dt){
     }
   }
 
-  // friction (only when spring is not active)
-  const speed = Math.hypot(disk.vx, disk.vy);
-  if(!anchor.active && speed > 1e-6 && friction > 0){
-    const decel = speed * friction * dt * frameMultiplier;
-    const rawNewSpeed = speed - decel;
-    let newSpeed;
-    if(Math.sign(rawNewSpeed) !== Math.sign(speed)){
-      newSpeed = speed;
-    } else {
-      newSpeed = rawNewSpeed;
-    }
-    const scale = newSpeed / speed;
-    disk.vx *= scale;
-    disk.vy *= scale;
-  }
-
   const W = canvas.width, H = canvas.height;
   let bounced = false, bounceSpeed = 0;
   if(disk.x - disk.r < 0){ disk.x = disk.r; bounceSpeed = Math.max(bounceSpeed, Math.abs(disk.vx)); disk.vx *= -params.bounce; bounced = true; }
   if(disk.x + disk.r > W){ disk.x = W - disk.r; bounceSpeed = Math.max(bounceSpeed, Math.abs(disk.vx)); disk.vx *= -params.bounce; bounced = true; }
   if(disk.y - disk.r < 0){ disk.y = disk.r; bounceSpeed = Math.max(bounceSpeed, Math.abs(disk.vy)); disk.vy *= -params.bounce; bounced = true; }
-  // bar collision: disk bounces off bar top with relative velocity
-  let hitBar = false;
-  if(disk.y + disk.r > bar.y){
-    disk.y = bar.y - disk.r;
-    bounceSpeed = Math.max(bounceSpeed, Math.abs(disk.vy));
-    disk.vy = -Math.abs(disk.vy) * params.bounce + 2 * bar.vy;
-    bounced = true;
-    hitBar = true;
-  }
+  let hitFloor = false;
+  if(disk.y + disk.r > H){ disk.y = H - disk.r; bounceSpeed = Math.max(bounceSpeed, Math.abs(disk.vy)); disk.vy *= -BAR_BOUNCE; bounced = true; hitFloor = true; }
   if(bounced) playKnock(Math.min(bounceSpeed / MAX_BOUNCE_SPEED, 1));
-  if(hitBar && !disk.glass){ disk.glass = true; playDing(); }
+  if(hitFloor && !disk.glass){ disk.glass = true; playDing(); }
   tickMallet(dt);
 
   if(bubblePop.active){

@@ -2,24 +2,6 @@ import { canvas, screen } from './state.js';
 import { disk, bar } from './playfield.js';
 
 export function initControls(){
-  const altFriction = document.getElementById('altFriction');
-  if(altFriction){
-    altFriction.addEventListener('click', () => {
-      const isOn = altFriction.dataset.on === 'true';
-      altFriction.dataset.on = isOn ? 'false' : 'true';
-      altFriction.textContent = (isOn ? '○' : '✓') + ' Alt Friction';
-    });
-  }
-
-  const quadSpring = document.getElementById('quadSpring');
-  if(quadSpring){
-    quadSpring.addEventListener('click', () => {
-      const isOn = quadSpring.dataset.on === 'true';
-      quadSpring.dataset.on = isOn ? 'false' : 'true';
-      quadSpring.textContent = (isOn ? '○' : '✓') + ' Quadratic Spring';
-    });
-  }
-
   const fullscreenBtn = document.getElementById('fullscreenBtn');
   if(fullscreenBtn){
     fullscreenBtn.addEventListener('pointerdown', (e)=> e.stopPropagation());
@@ -40,12 +22,13 @@ export function initControls(){
   resetBtn.addEventListener('pointerdown', (e)=> e.stopPropagation());
   resetBtn.addEventListener('click', ()=>{
     const eugene = document.body.dataset.player === 'eugene';
-    bar.y = eugene ? canvas.height - bar.height : bar.height;
-    bar.prevY = bar.y;
-    bar.vy = 0;
+    if(!bar.hidden){
+      bar.y = eugene ? canvas.height - bar.height : bar.height;
+      bar.prevY = bar.y;
+      bar.vy = 0;
+    }
     disk.x = canvas.width / 2;
-    // Center the disk in the playable area for the active layout.
-    disk.y = eugene ? (bar.y - disk.r) / 2 : (bar.y + bar.height + canvas.height) / 2;
+    disk.y = canvas.height / 2;
     disk.vx = 0;
     disk.vy = 0;
   });

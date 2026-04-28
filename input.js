@@ -40,7 +40,7 @@ export function setupInput(){
     const p = eventPos(ev);
 
     // Check bar hit first (must click directly on the bar)
-    if(p.y >= bar.y && p.y <= bar.y + bar.height){
+    if(!bar.hidden && p.y >= bar.y && p.y <= bar.y + bar.height){
       bar.dragging = true;
       barGrabOffset = bar.y - p.y;
       playGrab();
@@ -66,7 +66,7 @@ export function setupInput(){
     // if(hit) console.log('Hit! Frame lag:', hitFrame, '(0 = current frame)');
     // else console.log('Miss');
 
-    if(hit){
+    if(hit && inputHooks.diskGrab !== false){
       const clamped = clampAnchor(p.x, p.y);
       anchor.active = true;
       anchor.x = clamped.x;

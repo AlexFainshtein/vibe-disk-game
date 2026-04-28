@@ -42,7 +42,8 @@ export const bar = {
   // Layout determines which side of the bar the disk lives on (and therefore
   // how the bar-drag clamp works). Default 'bottom' = disk above bar (Eugene
   // style); variants set this to 'top' (Alex style) at module load.
-  layout: 'bottom'
+  layout: 'bottom',
+  hidden: false
 };
 
 // Variants can override the disk radius fraction at module load. Updates

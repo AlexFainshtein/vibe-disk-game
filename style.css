@@ -9,9 +9,6 @@ body[data-player="alex"] #panel{top:auto;bottom:12px}
 #panel .row{display:block;margin:6px 0}
 #panel #resetDisk,#panel #fullscreenBtn,#panel #pauseBtn,#panel #reverseBtn{background:#14323a;color:#e6eef6;padding:6px 8px;border-radius:6px;cursor:pointer;display:inline-block;margin:3px 0;border:none;font:inherit;pointer-events:auto}
 #panel #resetDisk:hover,#panel #fullscreenBtn:hover,#panel #pauseBtn:hover,#panel #reverseBtn:hover{background:#1b4a4f}
-#panel #altFriction{cursor:pointer;pointer-events:auto}
-#panel #altFriction[data-on="false"]{opacity:0.45}
-
 .hand-btn{position:fixed;bottom:12px;background:#14323a;color:#e6eef6;padding:6px 8px;border-radius:6px;cursor:pointer;font:13px Inter,system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial;pointer-events:auto;z-index:10}
 .hand-btn:hover{background:#1b4a4f}
 .hand-left{left:12px}
