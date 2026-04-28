@@ -3,6 +3,7 @@ import { disk, bar, anchor, setDiskRadiusFraction } from './playfield.js';
 import { bricks, initBricks, bubblePop } from './eugene-bricks.js';
 import { mallet, tickMallet } from './eugene-mallet.js';
 import { playKnock, playFanfare, playDing, playShatter } from './sound.js';
+import './eugene-handedness.js';
 
 // Eugene's hollow-shell mallet variant uses a much smaller disk than Alex's
 // fidget — the mallet is 3× the disk radius (see eugene-mallet.js), so a small
