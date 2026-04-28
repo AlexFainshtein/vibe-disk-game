@@ -1,25 +1,17 @@
-import { canvas, params, inputHooks } from './state.js';
+import { canvas, inputHooks } from './state.js';
 import { disk, bar, anchor, setDiskRadiusFraction } from './playfield.js';
 import { bricks, initBricks, bubblePop } from './eugene-bricks.js';
 import { mallet, tickMallet } from './eugene-mallet.js';
 import { playKnock, playFanfare, playDing, playShatter } from './sound.js';
 import './eugene-handedness.js';
+import {
+  DISK_RADIUS_FRACTION,
+  GRAVITY, DRAG, WALL_BOUNCE, FLOOR_BOUNCE, MAX_BOUNCE_SPEED, SUBSTEPS
+} from './eugene-config.js';
 
-// Eugene's hollow-shell mallet variant uses a much smaller disk than Alex's
-// fidget — the mallet is 3× the disk radius (see eugene-mallet.js), so a small
-// disk lets the shell feel substantial without filling the playfield. Override
-// the playfield default at module load.
-setDiskRadiusFraction(1/40);
-inputHooks.diskGrab = false; // disk grabbing / spring not used in Eugene's variant
+setDiskRadiusFraction(DISK_RADIUS_FRACTION);
+inputHooks.diskGrab = false;
 bar.hidden = true;
-
-
-const MAX_BOUNCE_SPEED = 1200;
-const GRAVITY         = 400;   // px/s² downward
-const DRAG            = 0.3;   // speed-proportional damping fraction per second
-const BAR_BOUNCE      = 1.1;   // bar restitution > 1 adds energy on bounce
-
-const SUBSTEPS = 4; // sub-steps per frame for brick collision accuracy
 
 function anyBrickHit(x, y, r, bricks){
   const r2 = r * r;
@@ -34,8 +26,6 @@ function anyBrickHit(x, y, r, bricks){
 }
 
 export function update(dt){
-  const friction = params.friction; // 0..1 fractional braking
-  const frameMultiplier = params.frameMultiplier;
 
   const subDt = dt / SUBSTEPS;
   let shattered = false;
@@ -44,7 +34,7 @@ export function update(dt){
     disk.vy += GRAVITY * subDt;
     const spd = Math.hypot(disk.vx, disk.vy);
     if(spd > 1e-6){
-      const dragScale = Math.max(0, 1 - DRAG * subDt * frameMultiplier);
+      const dragScale = Math.max(0, 1 - DRAG * subDt);
       disk.vx *= dragScale;
       disk.vy *= dragScale;
     }
@@ -112,8 +102,8 @@ export function update(dt){
           disk.x += nnx * (disk.r - len);
           disk.y += nny * (disk.r - len);
           const dot = disk.vx * nnx + disk.vy * nny;
-          disk.vx -= (1 + params.bounce) * dot * nnx;
-          disk.vy -= (1 + params.bounce) * dot * nny;
+          disk.vx -= (1 + WALL_BOUNCE) * dot * nnx;
+          disk.vy -= (1 + WALL_BOUNCE) * dot * nny;
         }
         break;
       }
@@ -127,11 +117,11 @@ export function update(dt){
 
   const W = canvas.width, H = canvas.height;
   let bounced = false, bounceSpeed = 0;
-  if(disk.x - disk.r < 0){ disk.x = disk.r; bounceSpeed = Math.max(bounceSpeed, Math.abs(disk.vx)); disk.vx *= -params.bounce; bounced = true; }
-  if(disk.x + disk.r > W){ disk.x = W - disk.r; bounceSpeed = Math.max(bounceSpeed, Math.abs(disk.vx)); disk.vx *= -params.bounce; bounced = true; }
-  if(disk.y - disk.r < 0){ disk.y = disk.r; bounceSpeed = Math.max(bounceSpeed, Math.abs(disk.vy)); disk.vy *= -params.bounce; bounced = true; }
+  if(disk.x - disk.r < 0){ disk.x = disk.r; bounceSpeed = Math.max(bounceSpeed, Math.abs(disk.vx)); disk.vx *= -WALL_BOUNCE; bounced = true; }
+  if(disk.x + disk.r > W){ disk.x = W - disk.r; bounceSpeed = Math.max(bounceSpeed, Math.abs(disk.vx)); disk.vx *= -WALL_BOUNCE; bounced = true; }
+  if(disk.y - disk.r < 0){ disk.y = disk.r; bounceSpeed = Math.max(bounceSpeed, Math.abs(disk.vy)); disk.vy *= -WALL_BOUNCE; bounced = true; }
   let hitFloor = false;
-  if(disk.y + disk.r > H){ disk.y = H - disk.r; bounceSpeed = Math.max(bounceSpeed, Math.abs(disk.vy)); disk.vy *= -BAR_BOUNCE; bounced = true; hitFloor = true; }
+  if(disk.y + disk.r > H){ disk.y = H - disk.r; bounceSpeed = Math.max(bounceSpeed, Math.abs(disk.vy)); disk.vy *= -FLOOR_BOUNCE; bounced = true; hitFloor = true; }
   if(bounced) playKnock(Math.min(bounceSpeed / MAX_BOUNCE_SPEED, 1));
   if(hitFloor && !disk.glass){ disk.glass = true; playDing(); }
   tickMallet(dt);

@@ -2,29 +2,12 @@ import { canvas, renderExtras, inputHooks } from './state.js';
 import { disk } from './playfield.js';
 import { playKnock, playGulp } from './sound.js';
 import { isLeftHanded } from './eugene-handedness.js';
+import {
+  MALLET_RADIUS_FRACTION, MALLET_CENTER_OFFSET, MALLET_INNER_RESTITUTION,
+  MAX_BOUNCE_SPEED, THUMB_CORNER_Y
+} from './eugene-config.js';
 
-// Eugene-only feature: tap empty space to spawn a hollow-shell mallet that
-// follows the finger. The mallet has TWO modes determined at spawn time by
-// whether the disk was inside or outside the shell:
-//   'outside' — disk outside; the mallet bounces it AWAY (off the outer rim),
-//               moderate restitution.
-//   'inside'  — disk inside; the mallet TRAPS it (it bounces off the inner
-//               wall), heavy damping (very inelastic).
-//
-// The finger touches the BOTTOM RIM of the shell (not its center) — feels
-// more natural when sweeping the mallet around, especially on phone.
-//
-// Self-registers a render hook + input hooks at module load. eugene-physics.js
-// calls tickMallet(dt) each frame to resolve the mallet→disk collision.
-
-// Mallet radius is 3× the disk radius (in the same shorter-canvas-dimension units).
-// Per eugene-physics, Eugene's variant calls setDiskRadiusFraction(1/40), so this
-// gives MALLET ≈ 9/40 of the shorter canvas dimension.
-export const MALLET_RADIUS_FRACTION = (1/40) * 9 * 0.5;
-
-const MALLET_RESTITUTION       = 0.5; // outer shell: moderate bounce
-const MALLET_INNER_RESTITUTION = 0.1; // inner shell: heavy damping
-const MAX_KNOCK_SPEED = 1200;
+export { MALLET_RADIUS_FRACTION };
 
 export const mallet = {
   active: false,
@@ -62,14 +45,14 @@ function malletRadius(){
 // point, at distance mallet.r beyond the touch — so the near rim sits under
 // the finger regardless of the drag direction.
 function thumbCorner(){
-  return { x: isLeftHanded ? 0 : canvas.width, y: canvas.height * 0.95 };
+  return { x: isLeftHanded ? 0 : canvas.width, y: canvas.height * THUMB_CORNER_Y };
 }
 
 function malletCenterFromTouch(tx, ty, r){
   const c = thumbCorner();
   const dx = tx - c.x, dy = ty - c.y;
   const len = Math.hypot(dx, dy) || 1e-6;
-  return { x: tx + (dx / len) * r * 2, y: ty + (dy / len) * r * 2 };
+  return { x: tx + (dx / len) * r * MALLET_CENTER_OFFSET, y: ty + (dy / len) * r * MALLET_CENTER_OFFSET };
 }
 
 inputHooks.emptyDown = (x, y) => {
@@ -144,6 +127,6 @@ export function tickMallet(dt){
     disk.vx -= (1 + MALLET_INNER_RESTITUTION) * relVn * nx;
     disk.vy -= (1 + MALLET_INNER_RESTITUTION) * relVn * ny;
     disk.glass = false;
-    playKnock(Math.min(Math.abs(relVn) / MAX_KNOCK_SPEED, 1));
+    playKnock(Math.min(Math.abs(relVn) / MAX_BOUNCE_SPEED, 1));
   }
 }

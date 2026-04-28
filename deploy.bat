@@ -16,6 +16,7 @@ copy eugene-physics.js public\
 copy eugene-bricks.js public\
 copy eugene-mallet.js public\
 copy eugene-handedness.js public\
+copy eugene-config.js public\
 copy render.js public\
 copy input.js public\
 copy sound.js public\
