@@ -25,7 +25,10 @@ export const disk = {
   r: Math.min(canvas.width, canvas.height) * DISK_RADIUS_FRACTION,
   vx: 0,
   vy: 0,
-  color: '#ffb86b',
+  color: '#ffb86b',     // base / edge color
+  highlight: null,      // optional: when set, render.js uses a radial gradient
+                        //   from highlight (offset upper-left) to color (edge),
+                        //   giving a "ball" / 3D look. Variants opt in.
   glass: false
 };
 
@@ -70,12 +73,6 @@ export const anchor = {
   y: 0,
   prevX: 0,
   prevY: 0
-};
-
-// debug: hit detection state
-export const clickMarker = {
-  active: false,
-  hit: false
 };
 
 // recent disk positions for lag-compensated hit detection

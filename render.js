@@ -1,5 +1,5 @@
 import { canvas, ctx, screen, renderExtras } from './state.js';
-import { disk, bar, clickMarker } from './playfield.js';
+import { disk, bar } from './playfield.js';
 
 // Draws the playfield primitives shared by every variant: background, feature
 // extras (trail, bumper, bricks, etc.), bar, disk, shadow, highlight, debug
@@ -63,6 +63,18 @@ export function draw(){
     ctx.strokeStyle = rimGrad;
     ctx.lineWidth = 2.5;
     ctx.stroke();
+  } else if(disk.highlight){
+    // Shaded "ball" look: radial gradient from disk.highlight (small bright
+    // spot offset toward upper-left, simulating a light source above-left)
+    // to disk.color (the edge / shaded side).
+    const grad = ctx.createRadialGradient(
+      disk.x - disk.r*0.4, disk.y - disk.r*0.4, disk.r*0.05,
+      disk.x,              disk.y,              disk.r
+    );
+    grad.addColorStop(0, disk.highlight);
+    grad.addColorStop(1, disk.color);
+    ctx.fillStyle = grad;
+    ctx.fill();
   } else {
     ctx.fillStyle = disk.color;
     ctx.fill();
@@ -70,16 +82,8 @@ export function draw(){
 
   // highlight
   ctx.beginPath();
-  ctx.fillStyle = disk.glass ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.14)';
+  ctx.fillStyle = disk.glass ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.06)';
   ctx.ellipse(disk.x - disk.r*0.25, disk.y - disk.r*0.35, disk.r*0.45, disk.r*0.25, -0.5, 0, Math.PI*2);
   ctx.fill();
 
-  // debug: disk boundary circle on hit
-  if(clickMarker.active && clickMarker.hit){
-    ctx.beginPath();
-    ctx.arc(disk.x, disk.y, disk.r, 0, Math.PI*2);
-    ctx.strokeStyle = 'rgba(0,255,0,0.3)';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-  }
 }

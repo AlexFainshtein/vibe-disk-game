@@ -9,9 +9,14 @@ import { createSpringDragController } from './controller-spring-drag.js';
 
 // Alex-specific color palette (overrides the warm defaults in playfield.js).
 // Background gradient is set in state.js (screen.backgrounds.alex).
-disk.color = '#ffa53d'; // saturated amber — the protagonist
-bar.color  = '#3a4a66'; // dark slate — playfield furniture, shared with the bumper
-const SPRING_COLOR = '#22e8c4'; // vivid teal-mint — between cyan and green, strong but not neon
+// Monochrome: the disk reads as a "ball" via a radial gradient (light highlight
+// at upper-left → mid-gray edge). The trail is the disk's translucent echo
+// (rgba 255,255,255,0.28 in alex-trail.js); the spring line is mid-gray as
+// the only non-white element on the playfield.
+disk.color     = '#888888'; // edge / shaded side of the ball
+disk.highlight = '#e8e8e8'; // bright spot (light source from upper-left)
+bar.color      = '#3a4a66'; // dark slate — playfield furniture, shared with the bumper
+const SPRING_COLOR = '#aaaaaa'; // mid-gray — visible on both dark background and white disk
 
 // Alex's bar lives at the top of the canvas as a movable ceiling; the disk lives
 // below it with the canvas bottom as the floor. This flips the wall collisions

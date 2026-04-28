@@ -1,5 +1,5 @@
 import { canvas, inputHooks } from './state.js';
-import { disk, bar, clickMarker, diskHistory, anchor, clampBarY } from './playfield.js';
+import { disk, bar, diskHistory, anchor, clampBarY } from './playfield.js';
 import { playGrab, playRelease } from './sound.js';
 
 function eventPos(e){
@@ -65,8 +65,6 @@ export function setupInput(){
     }
     // if(hit) console.log('Hit! Frame lag:', hitFrame, '(0 = current frame)');
     // else console.log('Miss');
-    clickMarker.hit = hit;
-    clickMarker.active = true;
 
     if(hit){
       const clamped = clampAnchor(p.x, p.y);
@@ -116,7 +114,6 @@ export function setupInput(){
     }
     if(anchor.active){
       anchor.active = false;
-      clickMarker.active = false;
       playRelease();
       try{ canvas.releasePointerCapture(ev.pointerId); }catch(e){}
       return;
