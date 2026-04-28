@@ -17,7 +17,8 @@ export const screen = {
   current: document.body.dataset.player ?? 'alex',
   backgrounds: {
     alex:   { top: '#071018', bottom: '#071018' },
-    eugene: { top: '#180710', bottom: '#1a0714' }
+    eugene: { top: '#180710', bottom: '#1a0714' },
+    zen1:   { top: '#071018', bottom: '#071018' }
   }
 };
 
