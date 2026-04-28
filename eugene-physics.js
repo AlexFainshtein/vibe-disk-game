@@ -6,7 +6,7 @@ import { playKnock, playFanfare, playDing, playShatter } from './sound.js';
 import './eugene-handedness.js';
 import {
   DISK_RADIUS_FRACTION,
-  GRAVITY, DRAG, WALL_BOUNCE, FLOOR_BOUNCE, MAX_BOUNCE_SPEED, SUBSTEPS
+  GRAVITY, DRAG, DRAG_INSIDE_MALLET, WALL_BOUNCE, FLOOR_BOUNCE, MAX_BOUNCE_SPEED, SUBSTEPS
 } from './eugene-config.js';
 
 setDiskRadiusFraction(DISK_RADIUS_FRACTION);
@@ -32,11 +32,22 @@ export function update(dt){
   for(let s = 0; s < SUBSTEPS && !shattered; s++){
     // gravity + speed-proportional drag (always, even during spring)
     disk.vy += GRAVITY * subDt;
-    const spd = Math.hypot(disk.vx, disk.vy);
-    if(spd > 1e-6){
-      const dragScale = Math.max(0, 1 - DRAG * subDt);
-      disk.vx *= dragScale;
-      disk.vy *= dragScale;
+    if(mallet.active && mallet.mode === 'inside'){
+      const relVx = disk.vx - mallet.vx;
+      const relVy = disk.vy - mallet.vy;
+      const relSpd = Math.hypot(relVx, relVy);
+      if(relSpd > 1e-6){
+        const dragScale = Math.max(0, 1 - DRAG_INSIDE_MALLET * subDt);
+        disk.vx = mallet.vx + relVx * dragScale;
+        disk.vy = mallet.vy + relVy * dragScale;
+      }
+    } else {
+      const spd = Math.hypot(disk.vx, disk.vy);
+      if(spd > 1e-6){
+        const dragScale = Math.max(0, 1 - DRAG * subDt);
+        disk.vx *= dragScale;
+        disk.vy *= dragScale;
+      }
     }
 
     // integrate position; bisect to first brick contact if needed; at most 1 brick per substep
