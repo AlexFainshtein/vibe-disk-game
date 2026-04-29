@@ -179,6 +179,31 @@ export function update(dt){
     }
   }
 
+  // Kinematic overlap push: bar or bumper was dragged into the disk.
+  // Correct disk position only — no velocity change.
+  {
+    const dist = barSignedDist(disk.x, disk.y);
+    if(dist < disk.r){
+      const { nx, ny } = barNormal();
+      disk.x += (disk.r - dist) * nx;
+      disk.y += (disk.r - dist) * ny;
+    }
+  }
+  if(USE_BUMPER && bumper.active){
+    const dx = disk.x - bumper.x, dy = disk.y - bumper.y;
+    const Rsum = disk.r + bumper.r;
+    const d2 = dx*dx + dy*dy;
+    if(d2 < Rsum*Rsum){
+      const d = Math.sqrt(d2);
+      if(d > 1e-9){
+        disk.x = bumper.x + (dx/d) * Rsum;
+        disk.y = bumper.y + (dy/d) * Rsum;
+      } else {
+        disk.y = bumper.y - Rsum; // disk exactly at bumper centre — push straight up
+      }
+    }
+  }
+
   let nowBarContact    = false;
   let nowBumperContact = false;
 
