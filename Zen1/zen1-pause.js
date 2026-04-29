@@ -1,8 +1,8 @@
-import { disk } from '../playfield.js';
-
-let paused = false;
-let savedVx = 0;
-let savedVy = 0;
+let paused   = false;
+let savedVx  = 0;
+let savedVy  = 0;
+let _diskBody = null;
+let _Vec2     = null;
 
 const buttonRef = document.getElementById('pauseBtn');
 
@@ -11,15 +11,16 @@ function setLabel(){
 }
 
 function togglePause(){
+  if(!_diskBody) return;
   if(!paused){
-    savedVx = disk.vx;
-    savedVy = disk.vy;
-    disk.vx = 0;
-    disk.vy = 0;
+    const v = _diskBody.getLinearVelocity();
+    savedVx = v.x;
+    savedVy = v.y;
+    _diskBody.setLinearVelocity(_Vec2(0, 0));
     paused = true;
   } else {
-    disk.vx = savedVx;
-    disk.vy = savedVy;
+    _diskBody.setLinearVelocity(_Vec2(savedVx, savedVy));
+    _diskBody.setAwake(true);
     paused = false;
   }
   setLabel();
@@ -30,12 +31,13 @@ if(buttonRef){
   buttonRef.addEventListener('click', togglePause);
 }
 
+export function initPause(diskBody, Vec2){
+  _diskBody = diskBody;
+  _Vec2     = Vec2;
+}
+
 export function clearPause(){
   if(!paused) return;
   paused = false;
   setLabel();
-}
-
-export function isPaused(){
-  return paused;
 }

@@ -3,8 +3,8 @@ import { disk, bar } from '../playfield.js';
 import { playKnock, playChime } from '../sound.js';
 import { tickTargets } from './zen1-targets.js';
 import { tickBumper, bumper, notifyBumperHit } from './zen1-bumper.js';
-import { tickTrail, pauseTrail, resetTrail, setTrailColor, resetTrailColor } from './zen1-trail.js';
-import { clearPause } from './zen1-pause.js';
+import { tickTrail, pauseTrail, resetTrail, cycleTrailColor } from './zen1-trail.js';
+import { initPause, clearPause } from './zen1-pause.js';
 import './zen1-bar.js';
 
 window.ZEN1_VERSION = 'planck-1';
@@ -33,31 +33,14 @@ function drawSpringLine(c){
 }
 renderExtras.push(drawSpringLine);
 
-const REVERSE_TRAIL_COLOR = '#071018';
-const REVERSE_TRAIL_WIDTH = 3;
-let reverseToggleOn = false;
-function doReverse(){
-  const vel = diskBody.getLinearVelocity();
-  diskBody.setLinearVelocity(Vec2(-vel.x, -vel.y));
-  diskBody.setAwake(true);
-  reverseToggleOn = !reverseToggleOn;
-  if(reverseToggleOn) setTrailColor(REVERSE_TRAIL_COLOR, 'source-over', REVERSE_TRAIL_WIDTH);
-  else                resetTrailColor();
-  tickTrail();
-}
-window.addEventListener('keydown', (e) => {
-  if(e.key === 'r' || e.key === 'R') doReverse();
-});
-const reverseBtn = document.getElementById('reverseBtn');
-reverseBtn?.addEventListener('pointerdown', (e) => e.stopPropagation());
-reverseBtn?.addEventListener('click', doReverse);
+const colorBtn = document.getElementById('colorBtn');
+colorBtn?.addEventListener('pointerdown', (e) => e.stopPropagation());
+colorBtn?.addEventListener('click', cycleTrailColor);
 document.getElementById('resetDisk')?.addEventListener('click', () => {
   diskBody.setPosition(Vec2(toM(canvas.width / 2), toM(canvas.height / 2)));
   diskBody.setLinearVelocity(Vec2(0, 0));
   diskBody.setAwake(true);
   if(springJoint) destroySpringJoint();
-  resetTrailColor();
-  reverseToggleOn = false;
 });
 
 const INITIAL_SPEED_PX = 300;  // px/s given to a static disk on ± press
@@ -198,6 +181,7 @@ function handleContact(contact){
 }
 
 initWorld();
+initPause(diskBody, Vec2);
 
 window.addEventListener('resize', () => {
   const prevPos = diskBody?.getPosition();

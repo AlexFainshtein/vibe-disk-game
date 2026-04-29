@@ -1,30 +1,41 @@
-import { renderExtras } from '../state.js';
+import { canvas, renderExtras } from '../state.js';
 import { diskBody, toPx } from './zen1-physics.js';
 
-const TRAIL_COLOR = 'rgba(255, 255, 255, 0.28)';
-const TRAIL_WIDTH = 1.5;
+const MAX_POINTS = 16;
+const TRAIL_WIDTH = 2;
 
-const trail = [];
-let currentSegment = null;
-let nextSegmentColor = TRAIL_COLOR;
-let nextSegmentComposite = 'source-over';
-let nextSegmentWidth = TRAIL_WIDTH;
+const PASTEL_COLORS = [
+  'rgba(180, 180, 180, 0.2)',   // grey (default)
+  'rgba(255, 179, 186, 0.2)',   // pink
+  'rgba(186, 225, 255, 0.2)',   // sky blue
+  'rgba(186, 255, 201, 0.2)',   // mint
+  'rgba(255, 223, 186, 0.2)',   // peach
+  'rgba(232, 186, 255, 0.2)',   // lavender
+  'rgba(255, 255, 186, 0.2)',   // yellow
+  'rgba(201, 241, 255, 0.2)',   // cyan
+  'rgba(255, 209, 220, 0.2)',   // rose
+];
+
+let colorIndex = 0;
+
+const positions = [];
+
+let offscreen = null;
+let offCtx    = null;
+
 let initialized = false;
 
+function ensureOffscreen(){
+  if(offscreen && offscreen.width === canvas.width && offscreen.height === canvas.height) return;
+  offscreen        = document.createElement('canvas');
+  offscreen.width  = canvas.width;
+  offscreen.height = canvas.height;
+  offCtx           = offscreen.getContext('2d');
+  positions.length = 0; // break path so resize doesn't connect mismatched coords
+}
+
 function drawTrail(c){
-  for(const segment of trail){
-    if(segment.points.length < 2) continue;
-    c.strokeStyle = segment.color;
-    c.globalCompositeOperation = segment.composite || 'source-over';
-    c.lineWidth = segment.width || TRAIL_WIDTH;
-    c.beginPath();
-    c.moveTo(segment.points[0].x, segment.points[0].y);
-    for(let i = 1; i < segment.points.length; i++){
-      c.lineTo(segment.points[i].x, segment.points[i].y);
-    }
-    c.stroke();
-  }
-  c.globalCompositeOperation = 'source-over';
+  if(offscreen) c.drawImage(offscreen, 0, 0);
 }
 
 function init(){
@@ -36,33 +47,35 @@ function init(){
 
 export function tickTrail(){
   if(!initialized) init();
-  if(!currentSegment){
-    currentSegment = { color: nextSegmentColor, composite: nextSegmentComposite, width: nextSegmentWidth, points: [] };
-    trail.push(currentSegment);
-  }
+  ensureOffscreen();
   const pos = diskBody.getPosition();
-  currentSegment.points.push({ x: toPx(pos.x), y: toPx(pos.y) });
+  const cur = { x: toPx(pos.x), y: toPx(pos.y) };
+
+  if(positions.length > 0){
+    const prev = positions[positions.length - 1];
+    offCtx.strokeStyle = PASTEL_COLORS[colorIndex];
+    offCtx.lineWidth   = TRAIL_WIDTH;
+    offCtx.lineCap  = 'butt';
+    offCtx.beginPath();
+    offCtx.moveTo(prev.x, prev.y);
+    offCtx.lineTo(cur.x, cur.y);
+    offCtx.stroke();
+  }
+
+  positions.push(cur);
+  if(positions.length > MAX_POINTS) positions.shift();
 }
 
 export function pauseTrail(){
-  currentSegment = null;
+  positions.length = 0; // forget last position so no jump-line after grab
 }
 
 export function resetTrail(){
-  trail.length = 0;
-  currentSegment = null;
+  positions.length = 0;
+  ensureOffscreen();
+  offCtx.clearRect(0, 0, offscreen.width, offscreen.height);
 }
 
-export function setTrailColor(color, composite = 'source-over', width = TRAIL_WIDTH){
-  nextSegmentColor = color;
-  nextSegmentComposite = composite;
-  nextSegmentWidth = width;
-  currentSegment = null;
-}
-
-export function resetTrailColor(){
-  nextSegmentColor = TRAIL_COLOR;
-  nextSegmentComposite = 'source-over';
-  nextSegmentWidth = TRAIL_WIDTH;
-  currentSegment = null;
+export function cycleTrailColor(){
+  colorIndex = (colorIndex + 1) % PASTEL_COLORS.length;
 }
