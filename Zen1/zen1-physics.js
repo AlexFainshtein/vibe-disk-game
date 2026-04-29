@@ -5,7 +5,6 @@ import { tickTargets } from './zen1-targets.js';
 import { tickBumper, bumper, notifyBumperHit } from './zen1-bumper.js';
 import { tickTrail, pauseTrail, resetTrail, setTrailColor, resetTrailColor } from './zen1-trail.js';
 import { clearPause } from './zen1-pause.js';
-import { createSpringDragController } from '../controller-spring-drag.js';
 import './zen1-bar.js';
 
 disk.color     = '#888888';
@@ -57,22 +56,20 @@ if(uiHint){
   canvas.addEventListener('pointerdown', () => uiHint.classList.add('hidden'), { once: true });
 }
 
-const MAX_BOUNCE_SPEED = 1200;
+const MAX_BOUNCE_SPEED  = 1200;
+const SPRING_K          = 200;   // px/s² per px of displacement
+const PULL_DAMPING      = 8;     // viscous damping (F = −c·v) applied while spring is active
+const FLING_THRESHOLD   = 200;   // px/s — above this, release keeps velocity; below, freezes disk
 
-const USE_CHIMES  = true;
-const USE_TARGETS = false;
-const USE_BUMPER  = true;
-const USE_TRAIL   = true;
+const USE_CHIMES     = true;
+const USE_TARGETS    = false;
+const USE_BUMPER     = true;
+const USE_TRAIL      = true;
 const USE_IDLE_RESET = false;
 const IDLE_TIMEOUT   = 60;
 
-const springDrag = createSpringDragController({
-  springK: 200,
-  springDamp: 4,
-  flingThreshold: 200,
-});
-
-let idleTime = 0;
+let idleTime         = 0;
+let wasAnchorActive  = false;
 let wasBarContact    = false;
 let wasBumperContact = false;
 
@@ -81,8 +78,6 @@ function barFloorY(x){
   return bar.y1 + (bar.y2 - bar.y1) * (x / canvas.width);
 }
 
-// Bar surface normal pointing into the play area (upward into field).
-// Tangent = (W, tilt). Normal = normalize(tilt, -W).
 function barNormal(){
   const W = canvas.width;
   const tilt = (bar.y2 ?? bar.y1) - bar.y1;
@@ -90,7 +85,6 @@ function barNormal(){
   return { nx: tilt / len, ny: -W / len };
 }
 
-// Signed perpendicular distance from (x,y) to bar surface (positive = above/in play area).
 function barSignedDist(x, y){
   const { nx, ny } = barNormal();
   return x * nx + (y - bar.y1) * ny;
@@ -98,8 +92,8 @@ function barSignedDist(x, y){
 
 function noteFromY(){
   const R = disk.r, eps = 0.5;
-  if(disk.y <= R + eps)                         return 4;
-  if(disk.y >= barFloorY(disk.x) - R - eps)     return 0;
+  if(disk.y <= R + eps)                     return 4;
+  if(disk.y >= barFloorY(disk.x) - R - eps) return 0;
   const t = (disk.y - R - eps) / (bar.y - 2*R - 2*eps);
   if(t < 1/3) return 3;
   if(t < 2/3) return 2;
@@ -175,7 +169,7 @@ function reflectAtBumper(){
 }
 
 export function update(dt){
-  // Bar velocity at disk's x (for carry-disk-upward logic).
+  // Bar velocity at disk's x.
   const floorNow  = barFloorY(disk.x);
   const floorPrev = (bar.prevY1 ?? bar.y1) + ((bar.prevY2 ?? bar.y2) - (bar.prevY1 ?? bar.y1)) * (disk.x / canvas.width);
   bar.vy = (floorNow - floorPrev) / dt;
@@ -183,16 +177,35 @@ export function update(dt){
   bar.prevY1 = bar.y1;
   bar.prevY2 = bar.y2;
 
-  // Spring (applies force for full dt before CCD).
-  const ctrl = springDrag(disk, anchor, dt);
-  if(ctrl.grabbed) clearPause();
+  // Detect grab / release transitions.
+  const justGrabbed  = anchor.active && !wasAnchorActive;
+  const justReleased = !anchor.active && wasAnchorActive;
+  wasAnchorActive = anchor.active;
 
-  // Friction only when not held.
-  if(!anchor.active){
+  if(justGrabbed) clearPause();
+
+  // Spring force + velocity damping.
+  if(anchor.active){
+    disk.vx += SPRING_K * (anchor.x - disk.x) * dt;
+    disk.vy += SPRING_K * (anchor.y - disk.y) * dt;
+    const damp = Math.max(0, 1 - PULL_DAMPING * dt);
+    disk.vx *= damp;
+    disk.vy *= damp;
+  }
+
+  // On release: fling if fast, freeze if slow.
+  let flung = false;
+  if(justReleased){
+    const speed = Math.hypot(disk.vx, disk.vy);
+    if(speed <= FLING_THRESHOLD){ disk.vx = 0; disk.vy = 0; }
+    else flung = true;
+  }
+
+  // Friction (always).
+  {
     const speed = Math.hypot(disk.vx, disk.vy);
     if(speed > 1e-6 && params.friction > 0){
-      const decel = speed * params.friction * dt * params.frameMultiplier;
-      const newSpeed = Math.max(0, speed - decel);
+      const newSpeed = Math.max(0, speed - speed * params.friction * dt * params.frameMultiplier);
       disk.vx *= newSpeed / speed;
       disk.vy *= newSpeed / speed;
     }
@@ -237,7 +250,7 @@ export function update(dt){
     }
   }
 
-  // CCD loop: integrate to earliest collision, reflect, repeat.
+  // CCD: find earliest collision, integrate to it, reflect, repeat.
   let remaining = dt;
   for(let iter = 0; iter < 4 && remaining > 0; iter++){
     const wallHit = timeToWalls(remaining);
@@ -279,7 +292,7 @@ export function update(dt){
     }
   }
 
-  // Bar carries disk upward when bar is swept up.
+  // Bar carries disk upward when bar sweeps up.
   if(nowBarContact && bar.vy < 0 && disk.vy > bar.vy){
     disk.y = barFloorY(disk.x) - disk.r;
     if(disk.y < disk.r) disk.y = disk.r;
@@ -295,11 +308,11 @@ export function update(dt){
       nowBarContact = true;
     }
   }
-  if(disk.y < disk.r)                   disk.y = disk.r;
-  if(disk.x < disk.r)                   disk.x = disk.r;
-  if(disk.x + disk.r > canvas.width)    disk.x = canvas.width - disk.r;
+  if(disk.y < disk.r)                disk.y = disk.r;
+  if(disk.x < disk.r)                disk.x = disk.r;
+  if(disk.x + disk.r > canvas.width) disk.x = canvas.width - disk.r;
 
-  // Sound: rising-edge only (bar and bumper).
+  // Sound: rising-edge for bar and bumper.
   if(nowBarContact && !wasBarContact){
     const approach = Math.max(Math.abs(disk.vy), Math.abs(bar.vy));
     const intensity = Math.max(0.15, Math.min(approach / MAX_BOUNCE_SPEED, 1));
@@ -320,8 +333,8 @@ export function update(dt){
   if(USE_TARGETS) tickTargets(dt);
 
   if(USE_TRAIL){
-    if(ctrl.grabbed)  pauseTrail();
-    if(ctrl.flung || barMoved || bumperEvents.firstHit || bumperEvents.removedAfterHit) resetTrail();
+    if(justGrabbed) pauseTrail();
+    if(flung || barMoved || bumperEvents.firstHit || bumperEvents.removedAfterHit) resetTrail();
     if(!anchor.active) tickTrail();
   }
 
