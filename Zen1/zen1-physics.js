@@ -59,11 +59,11 @@ if(uiHint){
 }
 
 // ─── Physics constants ────────────────────────────────────────────────────────
-const MAX_BOUNCE_SPEED = 1200;   // px/s — caps sound intensity normalisation
-const SPRING_K         = 10;    // spring acceleration strength, px/s² per px
-const PULL_DAMPING     = 8;      // viscous damping coefficient while spring active
-const FLING_THRESHOLD  = 200;    // px/s — below this, release freezes disk
-const ANCHOR_BOUNCE    = 0.5;    // restitution while spring is active (softer)
+const MAX_BOUNCE_SPEED  = 1200;  // px/s — caps sound intensity normalisation
+const SPRING_FREQ_HZ    = 4;     // DistanceJoint spring frequency (higher = stiffer)
+const SPRING_DAMP_RATIO = 0.7;   // DistanceJoint damping ratio (0 = oscillates, 1 = critical)
+const FLING_THRESHOLD   = 200;   // px/s — below this, release freezes disk
+const ANCHOR_BOUNCE     = 0.5;   // restitution while spring is active (softer)
 
 const USE_CHIMES     = true;
 const USE_TARGETS    = false;
@@ -74,18 +74,15 @@ const IDLE_TIMEOUT   = 60;
 
 // ─── Planck.js setup ─────────────────────────────────────────────────────────
 // planck is loaded as a UMD global via the <script> tag in zen1.html.
-const { World, Vec2, Box, Circle, Edge } = planck;
+const { World, Vec2, Box, Circle, Edge, DistanceJoint } = planck;
 
 // Unit conversion: Planck/Box2D works in metres; the game works in pixels.
 const PPM    = 64;                  // pixels per metre
 const toM    = px => px / PPM;
 const toPx   = m  => m  * PPM;
 
-// Spring constant in SI: same Hooke's-law stiffness expressed in m/s² per m.
-// a = SPRING_K * Δpx  →  a = (SPRING_K * PPM) * Δm  (same acceleration, different units)
-const SPRING_K_M = SPRING_K * PPM;
-
-let world, diskBody, barBody, bumperBody;
+let world, diskBody, barBody, bumperBody, anchorBody;
+let springJoint = null;
 let wallTop, wallLeft, wallRight;
 
 // Contact flags set inside the begin-contact listener (which fires during world.step).
@@ -151,6 +148,9 @@ function initWorld(){
     friction:    0,
   });
 
+  // Ghost body for the spring anchor — no fixture, just a joint endpoint.
+  anchorBody = world.createBody({ type: 'static', position: Vec2(0, 0) });
+
   // Collision sound listener.
   world.on('begin-contact', handleContact);
 }
@@ -186,6 +186,7 @@ initWorld();
 
 // Re-create the world on resize (edge shapes cannot be repositioned after creation).
 window.addEventListener('resize', () => {
+  springJoint = null;  // joint belongs to the old world — just forget it
   initWorld();
   syncDiskToBody();
 }, { passive: true });
@@ -216,24 +217,19 @@ function syncDiskToBody(){
   diskBody.setAwake(true);
 }
 
-function applyFriction(dt){
-  const speed = Math.hypot(disk.vx, disk.vy);
-  if(speed > 1e-6 && params.friction > 0){
-    const newSpeed = Math.max(0, speed - speed * params.friction * dt * params.frameMultiplier);
-    disk.vx *= newSpeed / speed;
-    disk.vy *= newSpeed / speed;
-  }
+
+function createSpringJoint(){
+  const ap = Vec2(toM(anchor.x), toM(anchor.y));
+  anchorBody.setPosition(ap);
+  springJoint = world.createJoint(DistanceJoint({
+    frequencyHz:  SPRING_FREQ_HZ,
+    dampingRatio: SPRING_DAMP_RATIO,
+    length:       0,
+  }, anchorBody, diskBody, ap, diskBody.getPosition()));
 }
 
-function applySpring(){
-  const pos  = diskBody.getPosition();
-  const vel  = diskBody.getLinearVelocity();
-  const mass = diskBody.getMass();
-  const dx   = toM(anchor.x) - pos.x;
-  const dy   = toM(anchor.y) - pos.y;
-  const fx   = mass * (SPRING_K_M * dx - PULL_DAMPING * vel.x);
-  const fy   = mass * (SPRING_K_M * dy - PULL_DAMPING * vel.y);
-  diskBody.applyForce(Vec2(fx, fy), pos, true);
+function destroySpringJoint(){
+  if(springJoint){ world.destroyJoint(springJoint); springJoint = null; }
 }
 
 function updateBarBody(){
@@ -282,7 +278,8 @@ export function update(dt){
   const justGrabbed  = anchor.active && !wasAnchorActive;
   const justReleased = !anchor.active && wasAnchorActive;
   wasAnchorActive = anchor.active;
-  if(justGrabbed) clearPause();
+  if(justGrabbed){ clearPause(); createSpringJoint(); }
+  if(justReleased) destroySpringJoint();
 
   // 3. Fling / freeze on release.
   let flung = false;
@@ -292,14 +289,14 @@ export function update(dt){
     else flung = true;
   }
 
-  // 4. Apply friction to game-side velocity before handing off to Planck.
-  applyFriction(dt);
-
-  // 5. Push game state (including any external changes) into Planck body.
+  // 4. Push game state (including any external changes) into Planck body.
   syncDiskToBody();
 
-  // 6. Per-frame restitution: softer while spring is active.
+  // 5. Per-frame restitution: softer while spring is active.
   diskBody.getFixtureList().setRestitution(anchor.active ? ANCHOR_BOUNCE : params.bounce);
+
+  // 6. Friction via Planck's native linearDamping (equivalent to params.friction per second).
+  diskBody.setLinearDamping(params.friction * params.frameMultiplier);
 
   // 7. Move kinematic bar.
   updateBarBody();
@@ -307,8 +304,8 @@ export function update(dt){
   // 8. Move kinematic bumper.
   updateBumperBody();
 
-  // 9. Spring force (applied before the step).
-  if(anchor.active) applySpring();
+  // 9. Move spring anchor to follow the finger.
+  if(anchor.active) anchorBody.setPosition(Vec2(toM(anchor.x), toM(anchor.y)));
 
   // 10. Cache pre-step speed for sound intensity (handleContact reads this).
   preStepSpeed     = Math.hypot(disk.vx, disk.vy);
@@ -322,13 +319,7 @@ export function update(dt){
   // 12. Read Planck results back into shared disk state.
   readBackDisk();
 
-  // 13. Apply friction again post-step (prevents energy re-injection from solver).
-  applyFriction(dt);
-
-  // 14. Push post-friction velocity back so the next step starts from the right value.
-  diskBody.setLinearVelocity(Vec2(toM(disk.vx), toM(disk.vy)));
-
-  // 15. Rising-edge sounds for bar and bumper.
+  // 13. Rising-edge sounds for bar and bumper.
   if(nowBarContact && !wasBarContact){
     const approach  = Math.max(Math.abs(disk.vy), Math.abs(bar.vy));
     const intensity = Math.max(0.15, Math.min(approach / MAX_BOUNCE_SPEED, 1));
