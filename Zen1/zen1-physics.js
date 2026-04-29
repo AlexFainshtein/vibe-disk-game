@@ -60,7 +60,7 @@ const MAX_BOUNCE_SPEED  = 1200;
 const SPRING_K          = 200;   // px/s² per px of displacement
 const PULL_DAMPING      = 8;     // viscous damping (F = −c·v) applied while spring is active
 const FLING_THRESHOLD   = 200;   // px/s — above this, release keeps velocity; below, freezes disk
-const ANCHOR_BOUNCE     = 1;//0.5;   // normal-only restitution while spring is active (softer wall hits)
+const ANCHOR_BOUNCE     = 0.5;   // normal-only restitution while spring is active (softer wall hits)
 
 const USE_CHIMES     = true;
 const USE_TARGETS    = false;
@@ -240,29 +240,30 @@ export function update(dt){
       }
       disk.x = xE;
       disk.y = yE;
-      // Contact constraint: if at a surface and new velocity points into it, zero that
-      // component. This is the normal force the surface provides — prevents the spring
-      // from accumulating into-surface velocity on a stationary ball that's touching.
-      {
-        const dist = barSignedDist(disk.x, disk.y);
-        if(dist < disk.r + 1){
-          const { nx, ny } = barNormal();
-          const vn = disk.vx*nx + disk.vy*ny;
-          if(vn < 0){ disk.vx -= vn*nx; disk.vy -= vn*ny; }
+      // Contact constraint: while spring is active, zero velocity into any nearby
+      // surface so the spring can't accumulate into-surface speed on a resting ball.
+      if(anchor.active){
+        {
+          const dist = barSignedDist(disk.x, disk.y);
+          if(dist < disk.r + 1){
+            const { nx, ny } = barNormal();
+            const vn = disk.vx*nx + disk.vy*ny;
+            if(vn < 0){ disk.vx -= vn*nx; disk.vy -= vn*ny; }
+          }
         }
-      }
-      if(USE_BUMPER && bumper.active){
-        const ddx = disk.x - bumper.x, ddy = disk.y - bumper.y;
-        const dd = Math.hypot(ddx, ddy);
-        if(dd > 1e-9 && dd < disk.r + bumper.r + 1){
-          const nx = ddx/dd, ny = ddy/dd;
-          const vn = disk.vx*nx + disk.vy*ny;
-          if(vn < 0){ disk.vx -= vn*nx; disk.vy -= vn*ny; }
+        if(USE_BUMPER && bumper.active){
+          const ddx = disk.x - bumper.x, ddy = disk.y - bumper.y;
+          const dd = Math.hypot(ddx, ddy);
+          if(dd > 1e-9 && dd < disk.r + bumper.r + 1){
+            const nx = ddx/dd, ny = ddy/dd;
+            const vn = disk.vx*nx + disk.vy*ny;
+            if(vn < 0){ disk.vx -= vn*nx; disk.vy -= vn*ny; }
+          }
         }
+        if(disk.x - disk.r              < 1 && disk.vx < 0) disk.vx = 0;
+        if(canvas.width - disk.x - disk.r < 1 && disk.vx > 0) disk.vx = 0;
+        if(disk.y - disk.r              < 1 && disk.vy < 0) disk.vy = 0;
       }
-      if(disk.x - disk.r              < 1 && disk.vx < 0) disk.vx = 0;
-      if(canvas.width - disk.x - disk.r < 1 && disk.vx > 0) disk.vx = 0;
-      if(disk.y - disk.r              < 1 && disk.vy < 0) disk.vy = 0;
       break;
     }
 
