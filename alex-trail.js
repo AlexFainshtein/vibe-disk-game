@@ -85,3 +85,13 @@ export function resetTrailColor(){
   nextSegmentWidth = TRAIL_WIDTH;
   currentSegment = null;
 }
+
+// Whether the trail has any drawn content (any segment with at least one
+// recorded point). Used by the Reverse-button enable/disable check — the
+// reverse experiment's visual effect requires an existing trail to act on.
+export function trailHasContent(){
+  for(const segment of trail){
+    if(segment.points.length > 0) return true;
+  }
+  return false;
+}
