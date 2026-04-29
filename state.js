@@ -36,8 +36,11 @@ export const renderExtras = [];
 
 // input extension points: feature modules can register handlers for touches on empty space
 // (i.e. neither the bar nor the disk). emptyDown returns true to capture the pointer for subsequent move/up.
+// barDown: if set, called when a bar-area touch begins. Return true to take over the drag
+// (input.js skips its normal bar drag); return false/undefined to let normal bar drag proceed.
 export const inputHooks = {
   emptyDown: null, // (x, y) => boolean
   emptyMove: null, // (x, y) => void
-  emptyUp:   null  // () => void
+  emptyUp:   null, // () => void
+  barDown:   null  // (x, y) => boolean — intercept bar-area pointerdown
 };

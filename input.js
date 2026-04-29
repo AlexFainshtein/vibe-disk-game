@@ -39,8 +39,16 @@ export function setupInput(){
   canvas.addEventListener('pointerdown', (ev)=>{
     const p = eventPos(ev);
 
-    // Check bar hit first (must click directly on the bar)
-    if(!bar.hidden && p.y >= bar.y && p.y <= bar.y + bar.height){
+    // Check bar hit first (must click directly on the bar).
+    // barDown hook is checked regardless of bar.hidden so variants that draw
+    // their own bar (hidden=true) can still intercept touches in the bar area.
+    const inBarBounds = p.y >= bar.y && p.y <= bar.y + bar.height;
+    if(inBarBounds && inputHooks.barDown && inputHooks.barDown(p.x, p.y) === true){
+      emptyEngaged = true; // reuse emptyEngaged so move/up route through emptyMove/emptyUp
+      canvas.setPointerCapture(ev.pointerId);
+      return;
+    }
+    if(!bar.hidden && inBarBounds){
       bar.dragging = true;
       barGrabOffset = bar.y - p.y;
       playGrab();

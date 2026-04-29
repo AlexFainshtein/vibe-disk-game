@@ -6,6 +6,7 @@ import { tickBumper, bumper, notifyBumperHit } from './zen1-bumper.js';
 import { tickTrail, pauseTrail, resetTrail, setTrailColor, resetTrailColor } from './zen1-trail.js';
 import { clearPause } from './zen1-pause.js';
 import { createSpringDragController } from '../controller-spring-drag.js';
+import './zen1-bar.js';
 
 disk.color     = '#888888';
 disk.highlight = '#e8e8e8';
@@ -13,13 +14,8 @@ bar.color      = '#3a4a66';
 const SPRING_COLOR = '#aaaaaa';
 
 // Bar is the floor near the bottom; disk lives in the upper 95%.
+// zen1-bar.js owns bar.y1/y2 positioning; we just set the layout here.
 bar.layout = 'bottom';
-
-function zen1InitialBarY(){
-  return canvas.height * 0.95 - bar.height;
-}
-bar.y = zen1InitialBarY();
-bar.prevY = bar.y;
 
 
 function drawSpringLine(c){
@@ -84,12 +80,18 @@ let idleTime = 0;
 let wasBarContact = false;
 let wasBumperContact = false;
 
+// Y of the bar's top surface at horizontal position x (linear interp between left/right edges).
+function barFloorY(x){
+  if(bar.y2 === undefined) return bar.y;
+  return bar.y1 + (bar.y2 - bar.y1) * (x / canvas.width);
+}
+
 function noteFromY(){
   // Bar is the floor; top wall is the ceiling. Higher position = higher note.
   const R = disk.r;
   const eps = 0.5;
   if(disk.y <= R + eps) return 4;             // touching top wall → highest
-  if(disk.y >= bar.y - R - eps) return 0;    // touching bar (floor) → lowest
+  if(disk.y >= barFloorY(disk.x) - R - eps) return 0;    // touching bar (floor) → lowest
   const t = (disk.y - R - eps) / (bar.y - 2*R - 2*eps);
   if(t < 1/3) return 3;
   if(t < 2/3) return 2;
@@ -112,8 +114,8 @@ function timeToWalls(dtRemaining){
     if(t >= 0 && t < bestT){ bestT = t; bestKind = 'top'; }
   }
   if(disk.vy > 0){
-    // bar is the floor
-    const t = (bar.y - disk.r - disk.y) / disk.vy;
+    // bar is the floor (approximate using current disk.x)
+    const t = (barFloorY(disk.x) - disk.r - disk.y) / disk.vy;
     if(t >= 0 && t < bestT){ bestT = t; bestKind = 'floor'; }
   }
   if(bestT > dtRemaining) return { t: Infinity, kind: null };
@@ -139,14 +141,32 @@ function timeToBumper(dtRemaining){
   return t;
 }
 
+function reflectAtBar(){
+  // Reflect velocity off the tilted bar surface using its actual surface normal.
+  // Bar tangent: (W, y2-y1). Normal pointing toward disk (upward): normalize(y2-y1, -W).
+  const W = canvas.width;
+  const tilt = (bar.y2 ?? bar.y1) - bar.y1;
+  const len = Math.hypot(W, tilt) || 1;
+  const nx = tilt / len;
+  const ny = -W / len;
+  const vDotN = disk.vx * nx + disk.vy * ny;
+  if(vDotN >= 0) return 0; // already separating
+  const factor = (1 + params.bounce) * vDotN;
+  disk.vx -= factor * nx;
+  disk.vy -= factor * ny;
+  return Math.abs(vDotN);
+}
+
 function reflectAtWall(kind){
   let bs = 0;
   if(kind === 'left' || kind === 'right'){
     bs = Math.abs(disk.vx);
     disk.vx *= -params.bounce;
-  } else if(kind === 'floor' || kind === 'top'){
+  } else if(kind === 'top'){
     bs = Math.abs(disk.vy);
     disk.vy *= -params.bounce;
+  } else if(kind === 'floor'){
+    bs = reflectAtBar();
   }
   return bs;
 }
@@ -166,9 +186,13 @@ function reflectAtBumper(){
 }
 
 export function update(dt){
-  bar.vy = (bar.y - bar.prevY) / dt;
-  const barMoved = bar.y !== bar.prevY;
-  bar.prevY = bar.y;
+  // Compute bar velocity at the disk's x position (accounts for independent edge movement).
+  const floorNow  = barFloorY(disk.x);
+  const floorPrev = (bar.prevY1 ?? bar.y1) + ((bar.prevY2 ?? bar.y2) - (bar.prevY1 ?? bar.y1)) * (disk.x / canvas.width);
+  bar.vy = (floorNow - floorPrev) / dt;
+  const barMoved = bar.y1 !== bar.prevY1 || bar.y2 !== bar.prevY2;
+  bar.prevY1 = bar.y1;
+  bar.prevY2 = bar.y2;
 
   const friction = params.friction;
   const frameMultiplier = params.frameMultiplier;
@@ -195,10 +219,13 @@ export function update(dt){
   let nowBumperContact = false;
 
   // Static-overlap snap (bar as floor): push disk up if it's inside the bar.
-  if(disk.y + disk.r > bar.y){
-    disk.y = bar.y - disk.r;
-    if(disk.y - disk.r < 0) disk.y = disk.r;
-    nowBarContact = true;
+  {
+    const floorY = barFloorY(disk.x);
+    if(disk.y + disk.r > floorY){
+      disk.y = floorY - disk.r;
+      if(disk.y - disk.r < 0) disk.y = disk.r;
+      nowBarContact = true;
+    }
   }
 
   if(USE_BUMPER && bumper.active){
@@ -219,7 +246,7 @@ export function update(dt){
       const minX = disk.r;
       const maxX = canvas.width - disk.r;
       const minY = disk.r;
-      const maxY = bar.y - disk.r;
+      const maxY = barFloorY(disk.x) - disk.r;
       disk.x = Math.max(minX, Math.min(maxX, disk.x));
       disk.y = Math.max(minY, Math.min(maxY, disk.y));
       const fdx = disk.x - bumper.x;
@@ -275,12 +302,16 @@ export function update(dt){
 
   // Bar-carries-disk pin: when bar moves up fast, keep disk flush against it.
   if(nowBarContact && bar.vy < 0 && disk.vy > bar.vy){
-    disk.y = bar.y - disk.r;
+    const floorY = barFloorY(disk.x);
+    disk.y = floorY - disk.r;
     if(disk.y - disk.r < 0) disk.y = disk.r;
   }
 
   // Defensive final overlap correction.
-  if(disk.y + disk.r > bar.y){ disk.y = bar.y - disk.r; nowBarContact = true; }
+  {
+    const floorY = barFloorY(disk.x);
+    if(disk.y + disk.r > floorY){ disk.y = floorY - disk.r; nowBarContact = true; }
+  }
   if(disk.y - disk.r < 0) disk.y = disk.r;
   if(disk.x - disk.r < 0) disk.x = disk.r;
   if(disk.x + disk.r > canvas.width) disk.x = canvas.width - disk.r;

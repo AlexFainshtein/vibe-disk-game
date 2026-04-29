@@ -66,15 +66,16 @@ function init(){
     return false;
   };
 
+  const prevMove = inputHooks.emptyMove;
   inputHooks.emptyMove = (x, y) => {
-    if(dragging){
-      bumper.x = x;
-      bumper.y = y;
-    }
+    if(dragging){ bumper.x = x; bumper.y = y; }
+    else if(prevMove) prevMove(x, y);
   };
 
+  const prevUp = inputHooks.emptyUp;
   inputHooks.emptyUp = () => {
     dragging = false;
+    if(prevUp) prevUp();
   };
 
   renderExtras.push(drawBumper);
