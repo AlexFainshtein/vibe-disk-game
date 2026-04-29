@@ -9,7 +9,7 @@ import { playGrab, playRelease } from '../sound.js';
 
 bar.hidden = true;
 
-function initialBarY(){ return canvas.height * 0.95 - bar.height; }
+function initialBarY(){ return canvas.height * 0.90; }
 
 bar.y1 = initialBarY();
 bar.y2 = initialBarY();
@@ -25,6 +25,8 @@ function resetToFlat(){
 }
 window.addEventListener('resize', resetToFlat, { passive: true });
 document.getElementById('resetDisk')?.addEventListener('click', resetToFlat);
+
+bar.floorY = (x) => bar.y1 + (bar.y2 - bar.y1) * (x / canvas.width);
 
 bar.prevY1 = bar.y1;
 bar.prevY2 = bar.y2;

@@ -61,6 +61,8 @@ if(uiHint){
 }
 
 const MAX_BOUNCE_SPEED = 1200;
+const ANCHOR_COLLISION_DAMPING = 0.5; // speed multiplier per collision while dragging
+const MIN_SOUND_SPEED = 20;           // px/s — suppress sounds below this while dragging
 
 const USE_CHIMES = true;
 const USE_TARGETS = false;
@@ -197,7 +199,34 @@ export function update(dt){
   const friction = params.friction;
   const frameMultiplier = params.frameMultiplier;
 
+  // Project the physics anchor to the nearest valid position — outside every solid obstacle.
+  // The visual spring line still draws to the real finger; only the force is affected.
+  const rawAnchorX = anchor.x, rawAnchorY = anchor.y;
+  if(anchor.active){
+    let ax = anchor.x, ay = anchor.y;
+    // Walls and bar
+    ax = Math.max(disk.r, Math.min(canvas.width - disk.r, ax));
+    ay = Math.max(disk.r, Math.min(barFloorY(ax) - disk.r, ay));
+    // Bumper: push anchor outside the combined exclusion radius
+    if(USE_BUMPER && bumper.active){
+      const minDist = bumper.r + disk.r;
+      const bdx = ax - bumper.x, bdy = ay - bumper.y;
+      const bd = Math.hypot(bdx, bdy);
+      if(bd < minDist){
+        const scale = minDist / (bd || 1);
+        ax = bumper.x + bdx * scale;
+        ay = bumper.y + bdy * scale;
+        // Re-clamp after bumper push
+        ax = Math.max(disk.r, Math.min(canvas.width - disk.r, ax));
+        ay = Math.max(disk.r, Math.min(barFloorY(ax) - disk.r, ay));
+      }
+    }
+    anchor.x = ax;
+    anchor.y = ay;
+  }
   const ctrl = springDrag(disk, anchor, dt);
+  anchor.x = rawAnchorX;
+  anchor.y = rawAnchorY;
   if(ctrl.grabbed) clearPause();
 
   const speed = Math.hypot(disk.vx, disk.vy);
@@ -292,11 +321,16 @@ export function update(dt){
     } else {
       // left, right, top — play immediately
       bs = reflectAtWall(kind);
-      if(bs > 0){
+      if(bs > 0 && (!anchor.active || bs > MIN_SOUND_SPEED)){
         const intensity = Math.min(bs / MAX_BOUNCE_SPEED, 1);
         if(USE_CHIMES) playChime(intensity, noteFromY());
         else playKnock(intensity);
       }
+    }
+
+    if(anchor.active){
+      disk.vx *= ANCHOR_COLLISION_DAMPING;
+      disk.vy *= ANCHOR_COLLISION_DAMPING;
     }
   }
 
@@ -316,13 +350,14 @@ export function update(dt){
   if(disk.x - disk.r < 0) disk.x = disk.r;
   if(disk.x + disk.r > canvas.width) disk.x = canvas.width - disk.r;
 
-  if(nowBarContact && !wasBarContact){
+
+  if(nowBarContact && !wasBarContact && (!anchor.active || Math.max(Math.abs(disk.vy), Math.abs(bar.vy)) > MIN_SOUND_SPEED)){
     const approach = Math.max(Math.abs(disk.vy), Math.abs(bar.vy));
     const intensity = Math.max(0.15, Math.min(approach / MAX_BOUNCE_SPEED, 1));
     if(USE_CHIMES) playChime(intensity, noteFromY());
     else playKnock(intensity);
   }
-  if(nowBumperContact && !wasBumperContact){
+  if(nowBumperContact && !wasBumperContact && (!anchor.active || Math.hypot(disk.vx, disk.vy) > MIN_SOUND_SPEED)){
     const approach = Math.hypot(disk.vx, disk.vy);
     const intensity = Math.max(0.15, Math.min(approach / MAX_BOUNCE_SPEED, 1));
     playKnock(intensity);

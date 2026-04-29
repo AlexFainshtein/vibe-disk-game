@@ -12,19 +12,7 @@ function distance(a,b){
 }
 
 function clampAnchor(x, y){
-  const margin = disk.r + 0.5;
-  let yMin, yMax;
-  if(bar.layout === 'top'){
-    yMin = bar.y + bar.height + margin; // just below the bar (the ceiling)
-    yMax = canvas.height - margin;       // just above the floor
-  } else {
-    yMin = margin;                        // just below the canvas top
-    yMax = bar.y - margin;                // just above the bar (the floor)
-  }
-  return {
-    x: Math.max(margin, Math.min(canvas.width - margin, x)),
-    y: Math.max(yMin, Math.min(yMax, y))
-  };
+  return { x, y };
 }
 
 export function setupInput(){
