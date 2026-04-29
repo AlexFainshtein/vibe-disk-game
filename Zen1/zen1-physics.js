@@ -12,7 +12,15 @@ disk.highlight = '#e8e8e8';
 bar.color      = '#3a4a66';
 const SPRING_COLOR = '#aaaaaa';
 
-bar.layout = 'top';
+// Bar is the floor near the bottom; disk lives in the upper 95%.
+bar.layout = 'bottom';
+
+function zen1InitialBarY(){
+  return canvas.height * 0.95 - bar.height;
+}
+bar.y = zen1InitialBarY();
+bar.prevY = bar.y;
+
 
 function drawSpringLine(c){
   if(!anchor.active) return;
@@ -77,14 +85,12 @@ let wasBarContact = false;
 let wasBumperContact = false;
 
 function noteFromY(){
-  const ceilingY = bar.y + bar.height;
-  const physY = disk.y - ceilingY;
-  const H = canvas.height - ceilingY;
+  // Bar is the floor; top wall is the ceiling. Higher position = higher note.
   const R = disk.r;
   const eps = 0.5;
-  if(physY <= R + eps) return 4;
-  if(physY >= H - R - eps) return 0;
-  const t = (physY - R - eps) / (H - 2*R - 2*eps);
+  if(disk.y <= R + eps) return 4;             // touching top wall → highest
+  if(disk.y >= bar.y - R - eps) return 0;    // touching bar (floor) → lowest
+  const t = (disk.y - R - eps) / (bar.y - 2*R - 2*eps);
   if(t < 1/3) return 3;
   if(t < 2/3) return 2;
   return 1;
@@ -100,14 +106,15 @@ function timeToWalls(dtRemaining){
     const t = (canvas.width - disk.r - disk.x) / disk.vx;
     if(t >= 0 && t < bestT){ bestT = t; bestKind = 'right'; }
   }
-  if(disk.vy > 0){
-    const t = (canvas.height - disk.r - disk.y) / disk.vy;
-    if(t >= 0 && t < bestT){ bestT = t; bestKind = 'floor'; }
-  }
   if(disk.vy < 0){
-    const ceilingY = bar.y + bar.height;
-    const t = (ceilingY + disk.r - disk.y) / disk.vy;
-    if(t >= 0 && t < bestT){ bestT = t; bestKind = 'ceiling'; }
+    // top wall
+    const t = (disk.r - disk.y) / disk.vy;
+    if(t >= 0 && t < bestT){ bestT = t; bestKind = 'top'; }
+  }
+  if(disk.vy > 0){
+    // bar is the floor
+    const t = (bar.y - disk.r - disk.y) / disk.vy;
+    if(t >= 0 && t < bestT){ bestT = t; bestKind = 'floor'; }
   }
   if(bestT > dtRemaining) return { t: Infinity, kind: null };
   return { t: bestT, kind: bestKind };
@@ -137,7 +144,7 @@ function reflectAtWall(kind){
   if(kind === 'left' || kind === 'right'){
     bs = Math.abs(disk.vx);
     disk.vx *= -params.bounce;
-  } else if(kind === 'floor' || kind === 'ceiling'){
+  } else if(kind === 'floor' || kind === 'top'){
     bs = Math.abs(disk.vy);
     disk.vy *= -params.bounce;
   }
@@ -187,13 +194,11 @@ export function update(dt){
   let nowBarContact = false;
   let nowBumperContact = false;
 
-  {
-    const ceilingY = bar.y + bar.height;
-    if(disk.y - disk.r < ceilingY){
-      disk.y = ceilingY + disk.r;
-      if(disk.y + disk.r > canvas.height) disk.y = canvas.height - disk.r;
-      nowBarContact = true;
-    }
+  // Static-overlap snap (bar as floor): push disk up if it's inside the bar.
+  if(disk.y + disk.r > bar.y){
+    disk.y = bar.y - disk.r;
+    if(disk.y - disk.r < 0) disk.y = disk.r;
+    nowBarContact = true;
   }
 
   if(USE_BUMPER && bumper.active){
@@ -213,8 +218,8 @@ export function update(dt){
       disk.y = bumper.y + ny * Rsum;
       const minX = disk.r;
       const maxX = canvas.width - disk.r;
-      const minY = bar.y + bar.height + disk.r;
-      const maxY = canvas.height - disk.r;
+      const minY = disk.r;
+      const maxY = bar.y - disk.r;
       disk.x = Math.max(minX, Math.min(maxX, disk.x));
       disk.y = Math.max(minY, Math.min(maxY, disk.y));
       const fdx = disk.x - bumper.x;
@@ -253,10 +258,12 @@ export function update(dt){
       bs = reflectAtBumper();
       notifyBumperHit();
       nowBumperContact = true;
-    } else if(kind === 'ceiling'){
+    } else if(kind === 'floor'){
+      // floor = bar — defer sound to rising-edge logic
       bs = reflectAtWall(kind);
       nowBarContact = true;
     } else {
+      // left, right, top — play immediately
       bs = reflectAtWall(kind);
       if(bs > 0){
         const intensity = Math.min(bs / MAX_BOUNCE_SPEED, 1);
@@ -266,19 +273,17 @@ export function update(dt){
     }
   }
 
-  if(nowBarContact && bar.vy > 0 && disk.vy < bar.vy){
-    const ceilingY = bar.y + bar.height;
-    disk.y = ceilingY + disk.r;
-    if(disk.y + disk.r > canvas.height) disk.y = canvas.height - disk.r;
+  // Bar-carries-disk pin: when bar moves up fast, keep disk flush against it.
+  if(nowBarContact && bar.vy < 0 && disk.vy > bar.vy){
+    disk.y = bar.y - disk.r;
+    if(disk.y - disk.r < 0) disk.y = disk.r;
   }
 
-  {
-    const ceilingY = bar.y + bar.height;
-    if(disk.y - disk.r < ceilingY){ disk.y = ceilingY + disk.r; nowBarContact = true; }
-    if(disk.y + disk.r > canvas.height) disk.y = canvas.height - disk.r;
-    if(disk.x - disk.r < 0) disk.x = disk.r;
-    if(disk.x + disk.r > canvas.width) disk.x = canvas.width - disk.r;
-  }
+  // Defensive final overlap correction.
+  if(disk.y + disk.r > bar.y){ disk.y = bar.y - disk.r; nowBarContact = true; }
+  if(disk.y - disk.r < 0) disk.y = disk.r;
+  if(disk.x - disk.r < 0) disk.x = disk.r;
+  if(disk.x + disk.r > canvas.width) disk.x = canvas.width - disk.r;
 
   if(nowBarContact && !wasBarContact){
     const approach = Math.max(Math.abs(disk.vy), Math.abs(bar.vy));

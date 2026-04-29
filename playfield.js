@@ -87,8 +87,12 @@ export function recordDiskPosition(){
 window.addEventListener('resize', ()=>{
   disk.r = Math.min(canvas.width, canvas.height) * DISK_RADIUS_FRACTION;
   bar.height = canvas.height * BAR_HEIGHT_FRACTION;
-  if(document.body.dataset.player === 'eugene'){
+  const player = document.body.dataset.player;
+  if(player === 'eugene'){
     bar.y = canvas.height - bar.height;
+    bar.prevY = bar.y;
+  } else if(player === 'zen1'){
+    bar.y = canvas.height * 0.95 - bar.height;
     bar.prevY = bar.y;
   } else {
     // re-clamp the user-dragged bar position in case resize made it invalid

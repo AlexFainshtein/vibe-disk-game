@@ -21,9 +21,15 @@ export function initControls(){
   const resetBtn = document.getElementById('resetDisk');
   resetBtn.addEventListener('pointerdown', (e)=> e.stopPropagation());
   resetBtn.addEventListener('click', ()=>{
-    const eugene = document.body.dataset.player === 'eugene';
+    const player = document.body.dataset.player;
     if(!bar.hidden){
-      bar.y = eugene ? canvas.height - bar.height : bar.height;
+      if(player === 'eugene'){
+        bar.y = canvas.height - bar.height;
+      } else if(player === 'zen1'){
+        bar.y = canvas.height * 0.95 - bar.height;
+      } else {
+        bar.y = bar.height;
+      }
       bar.prevY = bar.y;
       bar.vy = 0;
     }

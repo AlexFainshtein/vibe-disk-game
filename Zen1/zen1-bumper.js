@@ -2,7 +2,7 @@ import { canvas, renderExtras, inputHooks } from '../state.js';
 import { disk } from '../playfield.js';
 
 const BUMPER_RADIUS_FRACTION = 1/6;
-const BUMPER_COLOR = '#3a4a66';
+const BUMPER_COLOR = '#a0522d'; // sienna — distinct from the bar's dark slate
 
 function computeBumperRadius(){
   return Math.min(canvas.width, canvas.height) * BUMPER_RADIUS_FRACTION;
@@ -33,6 +33,8 @@ function drawBumper(c){
   c.fill();
 }
 
+let dragging = false;
+
 function place(x, y){
   bumper.active = true;
   bumper.x = x;
@@ -40,15 +42,6 @@ function place(x, y){
   firstHitPending = true;
   hitDuringThisPlacement = false;
   placedSinceLastTick = true;
-}
-
-function remove(){
-  if(!bumper.active) return;
-  bumper.active = false;
-  firstHitPending = false;
-  removedSinceLastTick = true;
-  if(hitDuringThisPlacement) removedAfterHitSinceLastTick = true;
-  hitDuringThisPlacement = false;
 }
 
 function init(){
@@ -60,18 +53,29 @@ function init(){
       const dx = x - bumper.x;
       const dy = y - bumper.y;
       if(dx*dx + dy*dy <= bumper.r * bumper.r){
-        remove();
-        return false;
+        // grabbed the bumper — start dragging
+        dragging = true;
+        return true; // capture move/up
       }
-      remove();
+      // tapped empty space while bumper exists — move it there
       place(x, y);
       return false;
     }
+    // no bumper yet — place one
     place(x, y);
     return false;
   };
 
-  document.getElementById('resetDisk')?.addEventListener('click', remove);
+  inputHooks.emptyMove = (x, y) => {
+    if(dragging){
+      bumper.x = x;
+      bumper.y = y;
+    }
+  };
+
+  inputHooks.emptyUp = () => {
+    dragging = false;
+  };
 
   renderExtras.push(drawBumper);
 }
