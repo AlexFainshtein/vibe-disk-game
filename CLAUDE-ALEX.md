@@ -1,10 +1,10 @@
 # CLAUDE-ALEX.md
 
-Alex's variant of the Vibe Disk Game. Auto-loaded into context via the `@`-import in [CLAUDE.md](CLAUDE.md). Read [CLAUDE.md](CLAUDE.md) first for shared concepts (engine, playfield, render/input/controls, sizing, reset chain).
+Alex's variant of the Vibe Disk Game — branded as **Drift** for shipping. Auto-loaded into context via the `@`-import in [CLAUDE.md](CLAUDE.md). Read [CLAUDE.md](CLAUDE.md) first for shared concepts (engine, playfield, render/input/controls, sizing, reset chain).
 
 ## Entry page
 
-- [alex.html](alex.html) — sets `<body data-player="alex">` so [main.js](main.js) dynamically imports `alex-physics.js`. Has Reset and ⏸ Pause buttons in `#panel`.
+- [index.html](index.html) — **is** Drift's entry page (the project's production index, no longer a menu). Sets `<body data-player="alex">` so [main.js](main.js) dynamically imports `alex-physics.js`. `<title>Drift</title>` for the browser tab. The `<div id="ui">Drift</div>` element is the on-screen title — large, centered near the top, fades on first canvas pointerdown via the listener in alex-physics.js. Buttons in `#panel`: Reset, ⏸ Pause, −, +, Erase (label toggles to Draw in Erase mode).
 
 ## Files
 
