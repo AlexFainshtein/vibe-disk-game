@@ -16,6 +16,10 @@ body[data-player="alex"] #panel{top:auto;bottom:12px}
 .hand-left{left:12px}
 .hand-right{right:12px}
 
+#speed-panel{position:fixed;bottom:12px;left:50%;transform:translateX(-50%);display:flex;gap:8px;pointer-events:none;z-index:10}
+#speed-panel button{background:#14323a;color:#e6eef6;border:none;border-radius:8px;width:52px;height:52px;font-size:26px;line-height:1;cursor:pointer;pointer-events:auto;font-family:inherit}
+#speed-panel button:hover{background:#1b4a4f}
+
 #nav{position:fixed;bottom:0;left:0;right:0;display:flex;justify-content:center;gap:0;z-index:10}
 .nav-btn{flex:1;max-width:200px;padding:12px 0;background:rgba(0,0,0,0.5);color:#e6eef6;border:none;border-top:2px solid transparent;font-size:14px;cursor:pointer}
 .nav-btn:hover{background:rgba(255,255,255,0.1)}

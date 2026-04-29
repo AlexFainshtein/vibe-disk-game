@@ -60,6 +60,30 @@ document.getElementById('resetDisk')?.addEventListener('click', () => {
   reverseToggleOn = false;
 });
 
+const INITIAL_SPEED_PX = 300;  // px/s given to a static disk on ± press
+const SPEED_FACTOR     = 1.2;
+const ANGLE_RAD        = 37 * Math.PI / 180;
+
+function adjustSpeed(factor){
+  const vel = diskBody.getLinearVelocity();
+  const spd = Math.hypot(vel.x, vel.y);
+  if(spd < 0.01){
+    const initSpd = toM(INITIAL_SPEED_PX) * factor;
+    diskBody.setLinearVelocity(Vec2(
+      initSpd * Math.cos(ANGLE_RAD),
+      initSpd * Math.sin(ANGLE_RAD),
+    ));
+  } else {
+    diskBody.setLinearVelocity(Vec2(vel.x * factor, vel.y * factor));
+  }
+  diskBody.setAwake(true);
+}
+
+document.getElementById('speedUp')?.addEventListener('pointerdown', (e) => e.stopPropagation());
+document.getElementById('speedUp')?.addEventListener('click', () => adjustSpeed(SPEED_FACTOR));
+document.getElementById('speedDown')?.addEventListener('pointerdown', (e) => e.stopPropagation());
+document.getElementById('speedDown')?.addEventListener('click', () => adjustSpeed(1 / SPEED_FACTOR));
+
 const uiHint = document.getElementById('ui');
 if(uiHint){
   canvas.addEventListener('pointerdown', () => uiHint.classList.add('hidden'), { once: true });
@@ -215,6 +239,7 @@ function destroySpringJoint(){
 export function grab(x, y){
   clearPause();
   disk.glass = false;
+  diskBody.setAwake(true);
   const ap = Vec2(toM(x), toM(y));
   anchorBody.setPosition(ap);
   springJoint = world.createJoint(DistanceJoint({
