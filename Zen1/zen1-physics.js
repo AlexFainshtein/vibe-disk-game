@@ -100,50 +100,27 @@ function noteFromY(){
   return 1;
 }
 
-function timeToWalls(dtRemaining){
-  let bestT = Infinity, bestKind = null;
-  if(disk.vx < 0){
-    const t = (disk.r - disk.x) / disk.vx;
-    if(t >= 0 && t < bestT){ bestT = t; bestKind = 'left'; }
-  }
-  if(disk.vx > 0){
-    const t = (canvas.width - disk.r - disk.x) / disk.vx;
-    if(t >= 0 && t < bestT){ bestT = t; bestKind = 'right'; }
-  }
-  if(disk.vy < 0){
-    const t = (disk.r - disk.y) / disk.vy;
-    if(t >= 0 && t < bestT){ bestT = t; bestKind = 'top'; }
-  }
-  {
-    const { nx, ny } = barNormal();
-    const vDotN = disk.vx * nx + disk.vy * ny;
-    if(vDotN < 0){
-      const dist = barSignedDist(disk.x, disk.y);
-      if(dist > disk.r){
-        const t = (dist - disk.r) / (-vDotN);
-        if(t >= 0 && t < bestT){ bestT = t; bestKind = 'floor'; }
-      }
-    }
-  }
-  if(bestT > dtRemaining) return { t: Infinity, kind: null };
-  return { t: bestT, kind: bestKind };
+function intersectorsAt(px, py){
+  const hits = [];
+  if(px - disk.r < 0)                         hits.push('left');
+  if(px + disk.r > canvas.width)               hits.push('right');
+  if(py - disk.r < 0)                          hits.push('top');
+  if(barSignedDist(px, py) < disk.r)           hits.push('floor');
+  if(USE_BUMPER && bumper.active &&
+     Math.hypot(px - bumper.x, py - bumper.y) < disk.r + bumper.r)
+                                               hits.push('bumper');
+  return hits;
 }
 
-function timeToBumper(dtRemaining){
-  if(!bumper.active) return Infinity;
-  const dx = disk.x - bumper.x, dy = disk.y - bumper.y;
-  const vx = disk.vx, vy = disk.vy;
-  const R = disk.r + bumper.r;
-  const a = vx*vx + vy*vy;
-  const b = 2*(dx*vx + dy*vy);
-  const c = dx*dx + dy*dy - R*R;
-  if(c < 0) return b < 0 ? 0 : Infinity;
-  if(a < 1e-12 || b >= 0) return Infinity;
-  const disc = b*b - 4*a*c;
-  if(disc < 0) return Infinity;
-  const t = (-b - Math.sqrt(disc)) / (2*a);
-  if(t < 0 || t > dtRemaining) return Infinity;
-  return t;
+function applyReflection(kind){
+  switch(kind){
+    case 'left':   { const s = Math.abs(disk.vx); disk.vx =  s * params.bounce; return s; }
+    case 'right':  { const s = Math.abs(disk.vx); disk.vx = -s * params.bounce; return s; }
+    case 'top':    { const s = Math.abs(disk.vy); disk.vy =  s * params.bounce; return s; }
+    case 'floor':  return reflectAtBar();
+    case 'bumper': return reflectAtBumper();
+  }
+  return 0;
 }
 
 function reflectAtBar(){
@@ -184,10 +161,6 @@ export function update(dt){
 
   if(justGrabbed) clearPause();
 
-  // Spring acceleration — computed once per frame, applied proportionally per CCD sub-step.
-  const ax = anchor.active ? SPRING_K * (anchor.x - disk.x) : 0;
-  const ay = anchor.active ? SPRING_K * (anchor.y - disk.y) : 0;
-
   // On release: fling if fast, freeze if slow.
   let flung = false;
   if(justReleased){
@@ -209,119 +182,86 @@ export function update(dt){
   let nowBarContact    = false;
   let nowBumperContact = false;
 
-  // Static overlap snap: bar.
-  {
-    const dist = barSignedDist(disk.x, disk.y);
-    if(dist < disk.r){
-      const { nx, ny } = barNormal();
-      disk.x += (disk.r - dist)*nx;
-      disk.y += (disk.r - dist)*ny;
-      // Contact constraint: zero velocity into the surface so it can't accumulate.
-      const vDotN = disk.vx*nx + disk.vy*ny;
-      if(vDotN < 0){ disk.vx -= vDotN*nx; disk.vy -= vDotN*ny; }
-      nowBarContact = true;
-    }
-  }
-
-  // Static overlap snap: bumper.
-  if(USE_BUMPER && bumper.active){
-    const ddx = disk.x - bumper.x, ddy = disk.y - bumper.y;
-    const Rsum = disk.r + bumper.r;
-    const d2 = ddx*ddx + ddy*ddy;
-    if(d2 < Rsum*Rsum){
-      let nx, ny;
-      if(d2 > 1e-9){ const d = Math.sqrt(d2); nx = ddx/d; ny = ddy/d; }
-      else { nx = 0; ny = -1; }
-      disk.x = bumper.x + nx*Rsum;
-      disk.y = bumper.y + ny*Rsum;
-      disk.x = Math.max(disk.r, Math.min(canvas.width - disk.r, disk.x));
-      disk.y = Math.max(disk.r, Math.min(barFloorY(disk.x) - disk.r, disk.y));
-      const fdx = disk.x - bumper.x, fdy = disk.y - bumper.y;
-      const fd2 = fdx*fdx + fdy*fdy;
-      if(fd2 < Rsum*Rsum){
-        const fd = Math.sqrt(fd2) || 1;
-        bumper.x = disk.x - (fdx/fd)*Rsum;
-        bumper.y = disk.y - (fdy/fd)*Rsum;
-      }
-      // Contact constraint: zero velocity into the bumper.
-      const vDotN = disk.vx*nx + disk.vy*ny;
-      if(vDotN < 0){ disk.vx -= vDotN*nx; disk.vy -= vDotN*ny; }
-      nowBumperContact = true;
-      notifyBumperHit();
-    }
-  }
-
-  // CCD: find earliest collision, integrate to it, reflect, repeat.
+  // Binary-search CCD loop.
   let remaining = dt;
-  for(let iter = 0; iter < 4 && remaining > 0; iter++){
-    const wallHit = timeToWalls(remaining);
-    const bumperT = USE_BUMPER ? timeToBumper(remaining) : Infinity;
+  for(let iter = 0; iter < 8 && remaining > 1e-9; iter++){
+    const x0 = disk.x, y0 = disk.y;
+    const vx0 = disk.vx, vy0 = disk.vy;
+    // Recompute spring accel at current position each substep.
+    const sax = anchor.active ? SPRING_K * (anchor.x - disk.x) : 0;
+    const say = anchor.active ? SPRING_K * (anchor.y - disk.y) : 0;
 
-    let t = remaining, kind = null;
-    if(wallHit.t < t){ t = wallHit.t; kind = wallHit.kind; }
-    if(bumperT  < t){ t = bumperT;   kind = 'bumper'; }
+    // Probe end-of-step position (linear — consistent with binary search below).
+    const xE = x0 + vx0 * remaining;
+    const yE = y0 + vy0 * remaining;
 
-    // Apply spring + damping for exactly this sub-step's duration.
-    disk.vx += ax * t;
-    disk.vy += ay * t;
-    if(anchor.active){
-      disk.vx *= Math.max(0, 1 - PULL_DAMPING * t);
-      disk.vy *= Math.max(0, 1 - PULL_DAMPING * t);
+    if(intersectorsAt(xE, yE).length === 0){
+      // No collision: commit full step.
+      disk.vx = vx0 + sax * remaining;
+      disk.vy = vy0 + say * remaining;
+      if(anchor.active){
+        disk.vx *= Math.max(0, 1 - PULL_DAMPING * remaining);
+        disk.vy *= Math.max(0, 1 - PULL_DAMPING * remaining);
+      }
+      disk.x = xE;
+      disk.y = yE;
+      break;
     }
 
-    disk.x += disk.vx * t;
-    disk.y += disk.vy * t;
-    remaining -= t;
+    // Binary search — 16 fixed bisection steps.
+    let tLo = 0, tHi = remaining;
+    for(let step = 0; step < 16; step++){
+      const tMid = (tLo + tHi) * 0.5;
+      if(intersectorsAt(x0 + vx0 * tMid, y0 + vy0 * tMid).length === 0)
+        tLo = tMid;
+      else
+        tHi = tMid;
+    }
 
-    if(kind === null) break;
+    // Continue bisecting until exactly 1 intersector (or safety limit).
+    let hitObjs = intersectorsAt(x0 + vx0 * tHi, y0 + vy0 * tHi);
+    for(let extra = 0; extra < 32 && hitObjs.length > 1; extra++){
+      if(tHi - tLo < 1e-12) break;
+      const tMid = (tLo + tHi) * 0.5;
+      const mids = intersectorsAt(x0 + vx0 * tMid, y0 + vy0 * tMid);
+      if(mids.length === 0) tLo = tMid;
+      else { tHi = tMid; hitObjs = mids; }
+    }
+
+    // tHi ≈ 0 means disk is stationary at the boundary — nothing to do.
+    if(tHi < 1e-9) break;
+
+    // Commit to contact point.
+    disk.vx = vx0 + sax * tHi;
+    disk.vy = vy0 + say * tHi;
+    if(anchor.active){
+      disk.vx *= Math.max(0, 1 - PULL_DAMPING * tHi);
+      disk.vy *= Math.max(0, 1 - PULL_DAMPING * tHi);
+    }
+    disk.x = x0 + vx0 * tHi;
+    disk.y = y0 + vy0 * tHi;
+
+    // Analytic reflection off the single hit object.
+    const kind = hitObjs[0];
+    const bs   = applyReflection(kind);
 
     if(USE_TRAIL && !anchor.active) tickTrail();
 
-    let bs = 0;
     if(kind === 'bumper'){
-      bs = reflectAtBumper();
       notifyBumperHit();
       nowBumperContact = true;
     } else if(kind === 'floor'){
-      bs = reflectAtBar();
       nowBarContact = true;
     } else {
-      if(kind === 'left' || kind === 'right'){
-        bs = Math.abs(disk.vx);
-        disk.vx *= -params.bounce;
-      } else {
-        bs = Math.abs(disk.vy);
-        disk.vy *= -params.bounce;
-      }
       if(bs > 0){
         const intensity = Math.min(bs / MAX_BOUNCE_SPEED, 1);
         if(USE_CHIMES) playChime(intensity, noteFromY());
         else           playKnock(intensity);
       }
     }
-  }
 
-  // Bar carries disk upward when bar sweeps up.
-  if(nowBarContact && bar.vy < 0 && disk.vy > bar.vy){
-    disk.y = barFloorY(disk.x) - disk.r;
-    if(disk.y < disk.r) disk.y = disk.r;
+    remaining -= tHi;
   }
-
-  // Defensive final overlap corrections.
-  {
-    const dist = barSignedDist(disk.x, disk.y);
-    if(dist < disk.r){
-      const { nx, ny } = barNormal();
-      disk.x += (disk.r - dist)*nx;
-      disk.y += (disk.r - dist)*ny;
-      const vDotN = disk.vx*nx + disk.vy*ny;
-      if(vDotN < 0){ disk.vx -= vDotN*nx; disk.vy -= vDotN*ny; }
-      nowBarContact = true;
-    }
-  }
-  if(disk.y < disk.r)                disk.y = disk.r;
-  if(disk.x < disk.r)                disk.x = disk.r;
-  if(disk.x + disk.r > canvas.width) disk.x = canvas.width - disk.r;
 
   // Sound: rising-edge for bar and bumper.
   if(nowBarContact && !wasBarContact){
