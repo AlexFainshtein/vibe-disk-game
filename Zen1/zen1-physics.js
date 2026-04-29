@@ -7,6 +7,8 @@ import { tickTrail, pauseTrail, resetTrail, setTrailColor, resetTrailColor } fro
 import { clearPause } from './zen1-pause.js';
 import './zen1-bar.js';
 
+window.ZEN1_VERSION = 'planck-1';
+
 disk.color     = '#888888';
 disk.highlight = '#e8e8e8';
 bar.color      = '#3a4a66';
@@ -56,11 +58,12 @@ if(uiHint){
   canvas.addEventListener('pointerdown', () => uiHint.classList.add('hidden'), { once: true });
 }
 
-const MAX_BOUNCE_SPEED  = 1200;
-const SPRING_K          = 200;   // px/s² per px of displacement
-const PULL_DAMPING      = 8;     // viscous damping (F = −c·v) applied while spring is active
-const FLING_THRESHOLD   = 200;   // px/s — above this, release keeps velocity; below, freezes disk
-const ANCHOR_BOUNCE     = 0.5;   // normal-only restitution while spring is active (softer wall hits)
+// ─── Physics constants ────────────────────────────────────────────────────────
+const MAX_BOUNCE_SPEED  = 1200;  // px/s — caps sound intensity normalisation
+const SPRING_FREQ_HZ    = 4;     // DistanceJoint spring frequency (higher = stiffer)
+const SPRING_DAMP_RATIO = 0.7;   // DistanceJoint damping ratio (0 = oscillates, 1 = critical)
+const FLING_THRESHOLD   = 200;   // px/s — below this, release freezes disk
+const ANCHOR_BOUNCE     = 0.5;   // restitution while spring is active (softer)
 
 const USE_CHIMES     = true;
 const USE_TARGETS    = false;
@@ -69,26 +72,130 @@ const USE_TRAIL      = true;
 const USE_IDLE_RESET = false;
 const IDLE_TIMEOUT   = 60;
 
-let idleTime         = 0;
-let wasAnchorActive  = false;
-let wasBarContact    = false;
-let wasBumperContact = false;
+// ─── Planck.js setup ─────────────────────────────────────────────────────────
+// planck is loaded as a UMD global via the <script> tag in zen1.html.
+const { World, Vec2, Box, Circle, Edge, DistanceJoint } = planck;
+
+// Unit conversion: Planck/Box2D works in metres; the game works in pixels.
+const PPM    = 64;                  // pixels per metre
+const toM    = px => px / PPM;
+const toPx   = m  => m  * PPM;
+
+let world, diskBody, barBody, bumperBody, anchorBody;
+let springJoint = null;
+let wallTop, wallLeft, wallRight;
+
+// Contact flags set inside the begin-contact listener (which fires during world.step).
+// preStepSpeed is written just before world.step so the listener can use it.
+let nowBarContact    = false;
+let nowBumperContact = false;
+let preStepSpeed     = 0;
+
+function makeEdgeWall(x1, y1, x2, y2){
+  const b = world.createBody({ type: 'static' });
+  b.createFixture(Edge(Vec2(toM(x1), toM(y1)), Vec2(toM(x2), toM(y2))), {
+    restitution: 0,
+    friction:    0,
+  });
+  return b;
+}
+
+function barCentroidM(){
+  const cx = canvas.width  / 2;
+  const cy = (bar.y1 + bar.y2) / 2 + bar.height / 2;
+  return Vec2(toM(cx), toM(cy));
+}
+
+function initWorld(){
+  const W = canvas.width, H = canvas.height;
+
+  world = World({ gravity: Vec2(0, 0) });
+
+  // Walls: four infinitely-thin edge bodies.  No tunneling risk regardless of speed.
+  wallTop   = makeEdgeWall(0, 0, W, 0);
+  wallLeft  = makeEdgeWall(0, 0, 0, H);
+  wallRight = makeEdgeWall(W, 0, W, H);
+  // Bottom "wall" is the bar — see barBody below.
+
+  // Bar: kinematic box.  Width is padded so the disk can never escape around the ends.
+  barBody = world.createBody({ type: 'kinematic', position: barCentroidM() });
+  barBody.createFixture(Box(toM(W / 2 + 4), toM(bar.height / 2 + 1)), {
+    restitution: 0,
+    friction:    0,
+  });
+
+  // Bumper: kinematic circle (active flag checked each frame).
+  bumperBody = world.createBody({
+    type:     'kinematic',
+    position: Vec2(toM(bumper.x), toM(bumper.y)),
+  });
+  bumperBody.createFixture(Circle(toM(bumper.r)), {
+    restitution: 0,
+    friction:    0,
+  });
+
+  // Disk: dynamic bullet circle (CCD enabled).
+  diskBody = world.createBody({
+    type:           'dynamic',
+    position:       Vec2(toM(disk.x), toM(disk.y)),
+    bullet:         true,     // CCD — no tunneling at high speeds
+    linearDamping:  0,        // friction applied manually each frame
+    fixedRotation:  true,     // disk never visually rotates
+  });
+  diskBody.createFixture(Circle(toM(disk.r)), {
+    restitution: params.bounce,
+    density:     1,
+    friction:    0,
+  });
+
+  // Ghost body for the spring anchor — no fixture, just a joint endpoint.
+  anchorBody = world.createBody({ type: 'static', position: Vec2(0, 0) });
+
+  // Collision sound listener.
+  world.on('begin-contact', handleContact);
+}
+
+function handleContact(contact){
+  const bA = contact.getFixtureA().getBody();
+  const bB = contact.getFixtureB().getBody();
+  if(bA !== diskBody && bB !== diskBody) return;
+  const other = (bA === diskBody) ? bB : bA;
+
+  const intensity = Math.min(preStepSpeed / MAX_BOUNCE_SPEED, 1);
+
+  if(other === barBody){
+    nowBarContact = true;
+  } else if(other === bumperBody){
+    if(USE_BUMPER){
+      notifyBumperHit();
+      nowBumperContact = true;
+    }
+  } else {
+    // Wall hit — play sound immediately (walls don't need rising-edge debounce).
+    if(intensity > 0){
+      if(USE_CHIMES) playChime(Math.max(0.15, intensity), noteFromY());
+      else           playKnock(intensity);
+    }
+  }
+}
+
+// Initialise the world once at module load.
+// zen1-bar.js (imported above) sets bar.y1 / bar.y2 synchronously, so the
+// bar geometry is ready by the time initWorld() runs.
+initWorld();
+
+// Re-create the world on resize (edge shapes cannot be repositioned after creation).
+window.addEventListener('resize', () => {
+  springJoint = null;  // joint belongs to the old world — just forget it
+  initWorld();
+  syncDiskToBody();
+}, { passive: true });
+
+// ─── Helpers used by update() ─────────────────────────────────────────────────
 
 function barFloorY(x){
   if(bar.y2 === undefined) return bar.y;
   return bar.y1 + (bar.y2 - bar.y1) * (x / canvas.width);
-}
-
-function barNormal(){
-  const W = canvas.width;
-  const tilt = (bar.y2 ?? bar.y1) - bar.y1;
-  const len = Math.hypot(W, tilt) || 1;
-  return { nx: tilt / len, ny: -W / len };
-}
-
-function barSignedDist(x, y){
-  const { nx, ny } = barNormal();
-  return x * nx + (y - bar.y1) * ny;
 }
 
 function noteFromY(){
@@ -101,68 +208,80 @@ function noteFromY(){
   return 1;
 }
 
-function intersectorsAt(px, py){
-  const hits = [];
-  if(px - disk.r < 0)                         hits.push('left');
-  if(px + disk.r > canvas.width)               hits.push('right');
-  if(py - disk.r < 0)                          hits.push('top');
-  if(barSignedDist(px, py) < disk.r)           hits.push('floor');
-  if(USE_BUMPER && bumper.active &&
-     Math.hypot(px - bumper.x, py - bumper.y) < disk.r + bumper.r)
-                                               hits.push('bumper');
-  return hits;
+// Push the game's authoritative disk state into the Planck body.
+// Called at the start of each update() to pick up external changes
+// (pause restore, reverse, reset, fling-freeze).
+function syncDiskToBody(){
+  diskBody.setPosition(Vec2(toM(disk.x), toM(disk.y)));
+  diskBody.setLinearVelocity(Vec2(toM(disk.vx), toM(disk.vy)));
+  diskBody.setAwake(true);
 }
 
-function applyReflection(kind, bounce){
-  switch(kind){
-    case 'left':   { const s = Math.abs(disk.vx); disk.vx =  s * bounce; return s; }
-    case 'right':  { const s = Math.abs(disk.vx); disk.vx = -s * bounce; return s; }
-    case 'top':    { const s = Math.abs(disk.vy); disk.vy =  s * bounce; return s; }
-    case 'floor':  return reflectAtBar(bounce);
-    case 'bumper': return reflectAtBumper(bounce);
-  }
-  return 0;
+
+function createSpringJoint(){
+  const ap = Vec2(toM(anchor.x), toM(anchor.y));
+  anchorBody.setPosition(ap);
+  springJoint = world.createJoint(DistanceJoint({
+    frequencyHz:  SPRING_FREQ_HZ,
+    dampingRatio: SPRING_DAMP_RATIO,
+    length:       0,
+  }, anchorBody, diskBody, ap, diskBody.getPosition()));
 }
 
-function reflectAtBar(bounce){
-  const { nx, ny } = barNormal();
-  const vDotN = disk.vx*nx + disk.vy*ny;
-  if(vDotN >= 0) return 0;
-  const factor = (1 + bounce) * vDotN;
-  disk.vx -= factor*nx;
-  disk.vy -= factor*ny;
-  return Math.abs(vDotN);
+function destroySpringJoint(){
+  if(springJoint){ world.destroyJoint(springJoint); springJoint = null; }
 }
 
-function reflectAtBumper(bounce){
-  const dx = disk.x - bumper.x, dy = disk.y - bumper.y;
-  const dist = Math.hypot(dx, dy) || 1;
-  const nx = dx/dist, ny = dy/dist;
-  const vDotN = disk.vx*nx + disk.vy*ny;
-  if(vDotN >= 0) return 0;
-  const factor = (1 + bounce) * vDotN;
-  disk.vx -= factor*nx;
-  disk.vy -= factor*ny;
-  return Math.abs(vDotN);
+function updateBarBody(){
+  const target = barCentroidM();
+  const angle  = Math.atan2(bar.y2 - bar.y1, canvas.width);
+  barBody.setPosition(target);
+  barBody.setAngle(angle);
+  barBody.setLinearVelocity(Vec2(0, 0));
 }
 
+function updateBumperBody(){
+  if(!USE_BUMPER || !bumper.active) return;
+  // Teleport only — bumper is a static obstacle, not a launcher.
+  // Giving it a velocity caused the solver to inject huge energy when dragged fast.
+  bumperBody.setPosition(Vec2(toM(bumper.x), toM(bumper.y)));
+  bumperBody.setLinearVelocity(Vec2(0, 0));
+}
+
+function readBackDisk(){
+  const pos = diskBody.getPosition();
+  const vel = diskBody.getLinearVelocity();
+  disk.x  = toPx(pos.x);
+  disk.y  = toPx(pos.y);
+  disk.vx = toPx(vel.x);
+  disk.vy = toPx(vel.y);
+}
+
+// ─── State between frames ─────────────────────────────────────────────────────
+let wasAnchorActive  = false;
+let wasBarContact    = false;
+let wasBumperContact = false;
+let idleTime         = 0;
+
+// ─── Main update ─────────────────────────────────────────────────────────────
 export function update(dt){
-  // Bar velocity at disk's x.
+  // 1. Bar velocity at disk's x (for sound intensity; kept in pixel-space).
   const floorNow  = barFloorY(disk.x);
-  const floorPrev = (bar.prevY1 ?? bar.y1) + ((bar.prevY2 ?? bar.y2) - (bar.prevY1 ?? bar.y1)) * (disk.x / canvas.width);
+  const floorPrev = (bar.prevY1 ?? bar.y1) +
+                    ((bar.prevY2 ?? bar.y2) - (bar.prevY1 ?? bar.y1)) * (disk.x / canvas.width);
   bar.vy = (floorNow - floorPrev) / dt;
   const barMoved = bar.y1 !== bar.prevY1 || bar.y2 !== bar.prevY2;
   bar.prevY1 = bar.y1;
   bar.prevY2 = bar.y2;
 
-  // Detect grab / release transitions.
+  // 2. Grab / release detection.
   const justGrabbed  = anchor.active && !wasAnchorActive;
   const justReleased = !anchor.active && wasAnchorActive;
   wasAnchorActive = anchor.active;
+  if(justGrabbed){ clearPause(); createSpringJoint(); }
+  if(justReleased) destroySpringJoint();
 
-  if(justGrabbed) clearPause();
-
-  // On release: fling if fast, freeze if slow.
+  // 3. Fling / freeze on release.
   let flung = false;
   if(justReleased){
     const speed = Math.hypot(disk.vx, disk.vy);
@@ -170,162 +289,39 @@ export function update(dt){
     else flung = true;
   }
 
-  // Friction (always).
-  {
-    const speed = Math.hypot(disk.vx, disk.vy);
-    if(speed > 1e-6 && params.friction > 0){
-      const newSpeed = Math.max(0, speed - speed * params.friction * dt * params.frameMultiplier);
-      disk.vx *= newSpeed / speed;
-      disk.vy *= newSpeed / speed;
-    }
-  }
+  // 4. Push game state (including any external changes) into Planck body.
+  syncDiskToBody();
 
-  // Kinematic overlap push: bar or bumper was dragged into the disk.
-  // Correct disk position only — no velocity change.
-  {
-    const dist = barSignedDist(disk.x, disk.y);
-    if(dist < disk.r){
-      const { nx, ny } = barNormal();
-      disk.x += (disk.r - dist) * nx;
-      disk.y += (disk.r - dist) * ny;
-      // Tilted bar normal has a horizontal component — clamp to canvas walls.
-      disk.x = Math.max(disk.r, Math.min(canvas.width - disk.r, disk.x));
-      disk.y = Math.max(disk.r, disk.y);
-    }
-  }
-  if(USE_BUMPER && bumper.active){
-    const dx = disk.x - bumper.x, dy = disk.y - bumper.y;
-    const Rsum = disk.r + bumper.r;
-    const d2 = dx*dx + dy*dy;
-    if(d2 < Rsum*Rsum){
-      const d = Math.sqrt(d2);
-      if(d > 1e-9){
-        disk.x = bumper.x + (dx/d) * Rsum;
-        disk.y = bumper.y + (dy/d) * Rsum;
-      } else {
-        disk.y = bumper.y - Rsum; // disk exactly at bumper centre — push straight up
-      }
-      // Clamp to canvas walls so the push can't strand the disk outside.
-      disk.x = Math.max(disk.r, Math.min(canvas.width - disk.r, disk.x));
-      disk.y = Math.max(disk.r, disk.y);
-    }
-  }
+  // 5. Per-frame restitution: softer while spring is active.
+  diskBody.getFixtureList().setRestitution(anchor.active ? ANCHOR_BOUNCE : params.bounce);
 
-  let nowBarContact    = false;
-  let nowBumperContact = false;
+  // 6. Friction via Planck's native linearDamping (equivalent to params.friction per second).
+  diskBody.setLinearDamping(params.friction * params.frameMultiplier);
 
-  // Binary-search CCD loop.
-  let remaining  = dt;
-  let skipSpring = false; // suppressed for the substep of a collision and the one after
-  for(let iter = 0; iter < 8 && remaining > 1e-9; iter++){
-    const x0 = disk.x, y0 = disk.y;
-    const vx0 = disk.vx, vy0 = disk.vy;
-    // Spring accel — skipped for one substep after any collision.
-    const applySpring = anchor.active && !skipSpring;
-    skipSpring = false; // consumed; a new collision will re-arm it
-    const sax = applySpring ? SPRING_K * (anchor.x - disk.x) : 0;
-    const say = applySpring ? SPRING_K * (anchor.y - disk.y) : 0;
+  // 7. Move kinematic bar.
+  updateBarBody();
 
-    // Probe end-of-step position (linear — consistent with binary search below).
-    const xE = x0 + vx0 * remaining;
-    const yE = y0 + vy0 * remaining;
+  // 8. Move kinematic bumper.
+  updateBumperBody();
 
-    if(intersectorsAt(xE, yE).length === 0){
-      // No collision: commit full step.
-      disk.vx = vx0 + sax * remaining;
-      disk.vy = vy0 + say * remaining;
-      if(anchor.active){
-        disk.vx *= Math.max(0, 1 - PULL_DAMPING * remaining);
-        disk.vy *= Math.max(0, 1 - PULL_DAMPING * remaining);
-      }
-      disk.x = xE;
-      disk.y = yE;
-      // Contact constraint: while spring is active, zero velocity into any nearby
-      // surface so the spring can't accumulate into-surface speed on a resting ball.
-      if(anchor.active){
-        {
-          const dist = barSignedDist(disk.x, disk.y);
-          if(dist < disk.r + 1){
-            const { nx, ny } = barNormal();
-            const vn = disk.vx*nx + disk.vy*ny;
-            if(vn < 0){ disk.vx -= vn*nx; disk.vy -= vn*ny; }
-          }
-        }
-        if(USE_BUMPER && bumper.active){
-          const ddx = disk.x - bumper.x, ddy = disk.y - bumper.y;
-          const dd = Math.hypot(ddx, ddy);
-          if(dd > 1e-9 && dd < disk.r + bumper.r + 1){
-            const nx = ddx/dd, ny = ddy/dd;
-            const vn = disk.vx*nx + disk.vy*ny;
-            if(vn < 0){ disk.vx -= vn*nx; disk.vy -= vn*ny; }
-          }
-        }
-        if(disk.x - disk.r              < 1 && disk.vx < 0) disk.vx = 0;
-        if(canvas.width - disk.x - disk.r < 1 && disk.vx > 0) disk.vx = 0;
-        if(disk.y - disk.r              < 1 && disk.vy < 0) disk.vy = 0;
-      }
-      break;
-    }
+  // 9. Move spring anchor to follow the finger.
+  if(anchor.active) anchorBody.setPosition(Vec2(toM(anchor.x), toM(anchor.y)));
 
-    // Binary search — 16 fixed bisection steps.
-    let tLo = 0, tHi = remaining;
-    for(let step = 0; step < 16; step++){
-      const tMid = (tLo + tHi) * 0.5;
-      if(intersectorsAt(x0 + vx0 * tMid, y0 + vy0 * tMid).length === 0)
-        tLo = tMid;
-      else
-        tHi = tMid;
-    }
+  // 10. Cache pre-step speed for sound intensity (handleContact reads this).
+  preStepSpeed     = Math.hypot(disk.vx, disk.vy);
+  nowBarContact    = false;
+  nowBumperContact = false;
 
-    // Continue bisecting until exactly 1 intersector (or safety limit).
-    let hitObjs = intersectorsAt(x0 + vx0 * tHi, y0 + vy0 * tHi);
-    for(let extra = 0; extra < 32 && hitObjs.length > 1; extra++){
-      if(tHi - tLo < 1e-12) break;
-      const tMid = (tLo + tHi) * 0.5;
-      const mids = intersectorsAt(x0 + vx0 * tMid, y0 + vy0 * tMid);
-      if(mids.length === 0) tLo = tMid;
-      else { tHi = tMid; hitObjs = mids; }
-    }
+  // 11. Physics step — Planck advances positions, resolves collisions.
+  //     8 velocity iterations + 3 position iterations is the Box2D recommendation.
+  world.step(dt, 8, 3);
 
-    // tHi ≈ 0 means disk is stationary at the boundary — nothing to do.
-    if(tHi < 1e-9) break;
+  // 12. Read Planck results back into shared disk state.
+  readBackDisk();
 
-    // Commit position to contact point; reflect pre-spring velocity.
-    // Spring delta-v is skipped: it would add velocity into the surface which
-    // the reflection immediately bounces back out, injecting energy each frame.
-    // Spring and damping act on the reflected velocity in the next substep.
-    disk.x  = x0 + vx0 * tHi;
-    disk.y  = y0 + vy0 * tHi;
-    disk.vx = vx0;
-    disk.vy = vy0;
-
-    // Analytic reflection off the single hit object.
-    const kind   = hitObjs[0];
-    const bounce = anchor.active ? ANCHOR_BOUNCE : params.bounce;
-    const bs     = applyReflection(kind, bounce);
-
-    if(USE_TRAIL && !anchor.active) tickTrail();
-
-    if(kind === 'bumper'){
-      notifyBumperHit();
-      nowBumperContact = true;
-    } else if(kind === 'floor'){
-      nowBarContact = true;
-    } else {
-      if(bs > 0){
-        const intensity = Math.min(bs / MAX_BOUNCE_SPEED, 1);
-        if(USE_CHIMES) playChime(intensity, noteFromY());
-        else           playKnock(intensity);
-      }
-    }
-
-    skipSpring = true; // suppress spring in the next substep too
-    remaining -= tHi;
-  }
-
-  // Sound: rising-edge for bar and bumper.
+  // 13. Rising-edge sounds for bar and bumper.
   if(nowBarContact && !wasBarContact){
-    const approach = Math.max(Math.abs(disk.vy), Math.abs(bar.vy));
+    const approach  = Math.max(Math.abs(disk.vy), Math.abs(bar.vy));
     const intensity = Math.max(0.15, Math.min(approach / MAX_BOUNCE_SPEED, 1));
     if(USE_CHIMES) playChime(intensity, noteFromY());
     else           playKnock(intensity);
@@ -337,6 +333,7 @@ export function update(dt){
   wasBarContact    = nowBarContact;
   wasBumperContact = nowBumperContact;
 
+  // 16. Bumper events / targets / trail / idle — unchanged from original.
   const bumperEvents = USE_BUMPER
     ? tickBumper()
     : { firstHit: false, placed: false, removed: false, removedAfterHit: false };
