@@ -22,6 +22,8 @@ copy input.js public\
 copy sound.js public\
 copy controls.js public\
 copy style.css public\
+if not exist public\Zen1 mkdir public\Zen1
+for %%f in (zen1\*) do copy /y %%f public\Zen1\
 if "%1"=="" (
   firebase deploy
 ) else (
