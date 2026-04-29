@@ -7,6 +7,8 @@ import { tickTrail, pauseTrail, resetTrail, setTrailColor, resetTrailColor } fro
 import { clearPause } from './zen1-pause.js';
 import './zen1-bar.js';
 
+window.ZEN1_VERSION = 'planck-1';
+
 disk.color     = '#888888';
 disk.highlight = '#e8e8e8';
 bar.color      = '#3a4a66';
@@ -58,7 +60,7 @@ if(uiHint){
 
 // ─── Physics constants ────────────────────────────────────────────────────────
 const MAX_BOUNCE_SPEED = 1200;   // px/s — caps sound intensity normalisation
-const SPRING_K         = 200;    // spring acceleration strength, px/s² per px
+const SPRING_K         = 10;    // spring acceleration strength, px/s² per px
 const PULL_DAMPING     = 8;      // viscous damping coefficient while spring active
 const FLING_THRESHOLD  = 200;    // px/s — below this, release freezes disk
 const ANCHOR_BOUNCE    = 0.5;    // restitution while spring is active (softer)
@@ -234,28 +236,20 @@ function applySpring(){
   diskBody.applyForce(Vec2(fx, fy), pos, true);
 }
 
-function updateBarBody(dt){
-  const prevPos = barBody.getPosition();
-  const target  = barCentroidM();
-  const angle   = Math.atan2(bar.y2 - bar.y1, canvas.width);
-
-  // Velocity tells the solver how fast the surface is moving → correct impulse on disk.
-  const vx = (target.x - prevPos.x) / dt;
-  const vy = (target.y - prevPos.y) / dt;
-
+function updateBarBody(){
+  const target = barCentroidM();
+  const angle  = Math.atan2(bar.y2 - bar.y1, canvas.width);
   barBody.setPosition(target);
   barBody.setAngle(angle);
-  barBody.setLinearVelocity(Vec2(vx, vy));
+  barBody.setLinearVelocity(Vec2(0, 0));
 }
 
-function updateBumperBody(dt){
+function updateBumperBody(){
   if(!USE_BUMPER || !bumper.active) return;
-  const prevPos = bumperBody.getPosition();
-  const tx = toM(bumper.x), ty = toM(bumper.y);
-  const vx = (tx - prevPos.x) / dt;
-  const vy = (ty - prevPos.y) / dt;
-  bumperBody.setPosition(Vec2(tx, ty));
-  bumperBody.setLinearVelocity(Vec2(vx, vy));
+  // Teleport only — bumper is a static obstacle, not a launcher.
+  // Giving it a velocity caused the solver to inject huge energy when dragged fast.
+  bumperBody.setPosition(Vec2(toM(bumper.x), toM(bumper.y)));
+  bumperBody.setLinearVelocity(Vec2(0, 0));
 }
 
 function readBackDisk(){
@@ -308,10 +302,10 @@ export function update(dt){
   diskBody.getFixtureList().setRestitution(anchor.active ? ANCHOR_BOUNCE : params.bounce);
 
   // 7. Move kinematic bar.
-  updateBarBody(dt);
+  updateBarBody();
 
   // 8. Move kinematic bumper.
-  updateBumperBody(dt);
+  updateBumperBody();
 
   // 9. Spring force (applied before the step).
   if(anchor.active) applySpring();
