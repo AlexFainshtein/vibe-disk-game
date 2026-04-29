@@ -184,14 +184,9 @@ export function update(dt){
 
   if(justGrabbed) clearPause();
 
-  // Spring force + velocity damping.
-  if(anchor.active){
-    disk.vx += SPRING_K * (anchor.x - disk.x) * dt;
-    disk.vy += SPRING_K * (anchor.y - disk.y) * dt;
-    const damp = Math.max(0, 1 - PULL_DAMPING * dt);
-    disk.vx *= damp;
-    disk.vy *= damp;
-  }
+  // Spring acceleration — computed once per frame, applied proportionally per CCD sub-step.
+  const ax = anchor.active ? SPRING_K * (anchor.x - disk.x) : 0;
+  const ay = anchor.active ? SPRING_K * (anchor.y - disk.y) : 0;
 
   // On release: fling if fast, freeze if slow.
   let flung = false;
@@ -221,6 +216,9 @@ export function update(dt){
       const { nx, ny } = barNormal();
       disk.x += (disk.r - dist)*nx;
       disk.y += (disk.r - dist)*ny;
+      // Contact constraint: zero velocity into the surface so it can't accumulate.
+      const vDotN = disk.vx*nx + disk.vy*ny;
+      if(vDotN < 0){ disk.vx -= vDotN*nx; disk.vy -= vDotN*ny; }
       nowBarContact = true;
     }
   }
@@ -245,6 +243,9 @@ export function update(dt){
         bumper.x = disk.x - (fdx/fd)*Rsum;
         bumper.y = disk.y - (fdy/fd)*Rsum;
       }
+      // Contact constraint: zero velocity into the bumper.
+      const vDotN = disk.vx*nx + disk.vy*ny;
+      if(vDotN < 0){ disk.vx -= vDotN*nx; disk.vy -= vDotN*ny; }
       nowBumperContact = true;
       notifyBumperHit();
     }
@@ -259,6 +260,14 @@ export function update(dt){
     let t = remaining, kind = null;
     if(wallHit.t < t){ t = wallHit.t; kind = wallHit.kind; }
     if(bumperT  < t){ t = bumperT;   kind = 'bumper'; }
+
+    // Apply spring + damping for exactly this sub-step's duration.
+    disk.vx += ax * t;
+    disk.vy += ay * t;
+    if(anchor.active){
+      disk.vx *= Math.max(0, 1 - PULL_DAMPING * t);
+      disk.vy *= Math.max(0, 1 - PULL_DAMPING * t);
+    }
 
     disk.x += disk.vx * t;
     disk.y += disk.vy * t;
@@ -305,6 +314,8 @@ export function update(dt){
       const { nx, ny } = barNormal();
       disk.x += (disk.r - dist)*nx;
       disk.y += (disk.r - dist)*ny;
+      const vDotN = disk.vx*nx + disk.vy*ny;
+      if(vDotN < 0){ disk.vx -= vDotN*nx; disk.vy -= vDotN*ny; }
       nowBarContact = true;
     }
   }
