@@ -13,10 +13,7 @@ disk.highlight = '#e8e8e8';
 bar.color      = '#3a4a66';
 const SPRING_COLOR = '#aaaaaa';
 
-// Bar is the floor near the bottom; disk lives in the upper 95%.
-// zen1-bar.js owns bar.y1/y2 positioning; we just set the layout here.
 bar.layout = 'bottom';
-
 
 function drawSpringLine(c){
   if(!anchor.active) return;
@@ -61,15 +58,13 @@ if(uiHint){
 }
 
 const MAX_BOUNCE_SPEED = 1200;
-const ANCHOR_COLLISION_DAMPING = 0.5; // speed multiplier per collision while dragging
-const MIN_SOUND_SPEED = 20;           // px/s — suppress sounds below this while dragging
 
-const USE_CHIMES = true;
+const USE_CHIMES  = true;
 const USE_TARGETS = false;
-const USE_BUMPER = true;
-const USE_TRAIL = true;
+const USE_BUMPER  = true;
+const USE_TRAIL   = true;
 const USE_IDLE_RESET = false;
-const IDLE_TIMEOUT = 60;
+const IDLE_TIMEOUT   = 60;
 
 const springDrag = createSpringDragController({
   springK: 200,
@@ -78,22 +73,33 @@ const springDrag = createSpringDragController({
 });
 
 let idleTime = 0;
-
-let wasBarContact = false;
+let wasBarContact    = false;
 let wasBumperContact = false;
 
-// Y of the bar's top surface at horizontal position x (linear interp between left/right edges).
 function barFloorY(x){
   if(bar.y2 === undefined) return bar.y;
   return bar.y1 + (bar.y2 - bar.y1) * (x / canvas.width);
 }
 
+// Bar surface normal pointing into the play area (upward into field).
+// Tangent = (W, tilt). Normal = normalize(tilt, -W).
+function barNormal(){
+  const W = canvas.width;
+  const tilt = (bar.y2 ?? bar.y1) - bar.y1;
+  const len = Math.hypot(W, tilt) || 1;
+  return { nx: tilt / len, ny: -W / len };
+}
+
+// Signed perpendicular distance from (x,y) to bar surface (positive = above/in play area).
+function barSignedDist(x, y){
+  const { nx, ny } = barNormal();
+  return x * nx + (y - bar.y1) * ny;
+}
+
 function noteFromY(){
-  // Bar is the floor; top wall is the ceiling. Higher position = higher note.
-  const R = disk.r;
-  const eps = 0.5;
-  if(disk.y <= R + eps) return 4;             // touching top wall → highest
-  if(disk.y >= barFloorY(disk.x) - R - eps) return 0;    // touching bar (floor) → lowest
+  const R = disk.r, eps = 0.5;
+  if(disk.y <= R + eps)                         return 4;
+  if(disk.y >= barFloorY(disk.x) - R - eps)     return 0;
   const t = (disk.y - R - eps) / (bar.y - 2*R - 2*eps);
   if(t < 1/3) return 3;
   if(t < 2/3) return 2;
@@ -111,14 +117,19 @@ function timeToWalls(dtRemaining){
     if(t >= 0 && t < bestT){ bestT = t; bestKind = 'right'; }
   }
   if(disk.vy < 0){
-    // top wall
     const t = (disk.r - disk.y) / disk.vy;
     if(t >= 0 && t < bestT){ bestT = t; bestKind = 'top'; }
   }
-  if(disk.vy > 0){
-    // bar is the floor (approximate using current disk.x)
-    const t = (barFloorY(disk.x) - disk.r - disk.y) / disk.vy;
-    if(t >= 0 && t < bestT){ bestT = t; bestKind = 'floor'; }
+  {
+    const { nx, ny } = barNormal();
+    const vDotN = disk.vx * nx + disk.vy * ny;
+    if(vDotN < 0){
+      const dist = barSignedDist(disk.x, disk.y);
+      if(dist > disk.r){
+        const t = (dist - disk.r) / (-vDotN);
+        if(t >= 0 && t < bestT){ bestT = t; bestKind = 'floor'; }
+      }
+    }
   }
   if(bestT > dtRemaining) return { t: Infinity, kind: null };
   return { t: bestT, kind: bestKind };
@@ -126,16 +137,14 @@ function timeToWalls(dtRemaining){
 
 function timeToBumper(dtRemaining){
   if(!bumper.active) return Infinity;
-  const dx = disk.x - bumper.x;
-  const dy = disk.y - bumper.y;
+  const dx = disk.x - bumper.x, dy = disk.y - bumper.y;
   const vx = disk.vx, vy = disk.vy;
   const R = disk.r + bumper.r;
   const a = vx*vx + vy*vy;
-  const b = 2 * (dx*vx + dy*vy);
+  const b = 2*(dx*vx + dy*vy);
   const c = dx*dx + dy*dy - R*R;
   if(c < 0) return b < 0 ? 0 : Infinity;
-  if(a < 1e-12) return Infinity;
-  if(b >= 0)    return Infinity;
+  if(a < 1e-12 || b >= 0) return Infinity;
   const disc = b*b - 4*a*c;
   if(disc < 0) return Infinity;
   const t = (-b - Math.sqrt(disc)) / (2*a);
@@ -144,51 +153,29 @@ function timeToBumper(dtRemaining){
 }
 
 function reflectAtBar(){
-  // Reflect velocity off the tilted bar surface using its actual surface normal.
-  // Bar tangent: (W, y2-y1). Normal pointing toward disk (upward): normalize(y2-y1, -W).
-  const W = canvas.width;
-  const tilt = (bar.y2 ?? bar.y1) - bar.y1;
-  const len = Math.hypot(W, tilt) || 1;
-  const nx = tilt / len;
-  const ny = -W / len;
-  const vDotN = disk.vx * nx + disk.vy * ny;
-  if(vDotN >= 0) return 0; // already separating
+  const { nx, ny } = barNormal();
+  const vDotN = disk.vx*nx + disk.vy*ny;
+  if(vDotN >= 0) return 0;
   const factor = (1 + params.bounce) * vDotN;
-  disk.vx -= factor * nx;
-  disk.vy -= factor * ny;
+  disk.vx -= factor*nx;
+  disk.vy -= factor*ny;
   return Math.abs(vDotN);
 }
 
-function reflectAtWall(kind){
-  let bs = 0;
-  if(kind === 'left' || kind === 'right'){
-    bs = Math.abs(disk.vx);
-    disk.vx *= -params.bounce;
-  } else if(kind === 'top'){
-    bs = Math.abs(disk.vy);
-    disk.vy *= -params.bounce;
-  } else if(kind === 'floor'){
-    bs = reflectAtBar();
-  }
-  return bs;
-}
-
 function reflectAtBumper(){
-  const dx = disk.x - bumper.x;
-  const dy = disk.y - bumper.y;
+  const dx = disk.x - bumper.x, dy = disk.y - bumper.y;
   const dist = Math.hypot(dx, dy) || 1;
-  const nx = dx / dist;
-  const ny = dy / dist;
-  const vDotN = disk.vx * nx + disk.vy * ny;
+  const nx = dx/dist, ny = dy/dist;
+  const vDotN = disk.vx*nx + disk.vy*ny;
   if(vDotN >= 0) return 0;
   const factor = (1 + params.bounce) * vDotN;
-  disk.vx -= factor * nx;
-  disk.vy -= factor * ny;
+  disk.vx -= factor*nx;
+  disk.vy -= factor*ny;
   return Math.abs(vDotN);
 }
 
 export function update(dt){
-  // Compute bar velocity at the disk's x position (accounts for independent edge movement).
+  // Bar velocity at disk's x (for carry-disk-upward logic).
   const floorNow  = barFloorY(disk.x);
   const floorPrev = (bar.prevY1 ?? bar.y1) + ((bar.prevY2 ?? bar.y2) - (bar.prevY1 ?? bar.y1)) * (disk.x / canvas.width);
   bar.vy = (floorNow - floorPrev) / dt;
@@ -196,110 +183,69 @@ export function update(dt){
   bar.prevY1 = bar.y1;
   bar.prevY2 = bar.y2;
 
-  const friction = params.friction;
-  const frameMultiplier = params.frameMultiplier;
-
-  // Project the physics anchor to the nearest valid position — outside every solid obstacle.
-  // The visual spring line still draws to the real finger; only the force is affected.
-  const rawAnchorX = anchor.x, rawAnchorY = anchor.y;
-  if(anchor.active){
-    let ax = anchor.x, ay = anchor.y;
-    // Walls and bar
-    ax = Math.max(disk.r, Math.min(canvas.width - disk.r, ax));
-    ay = Math.max(disk.r, Math.min(barFloorY(ax) - disk.r, ay));
-    // Bumper: push anchor outside the combined exclusion radius
-    if(USE_BUMPER && bumper.active){
-      const minDist = bumper.r + disk.r;
-      const bdx = ax - bumper.x, bdy = ay - bumper.y;
-      const bd = Math.hypot(bdx, bdy);
-      if(bd < minDist){
-        const scale = minDist / (bd || 1);
-        ax = bumper.x + bdx * scale;
-        ay = bumper.y + bdy * scale;
-        // Re-clamp after bumper push
-        ax = Math.max(disk.r, Math.min(canvas.width - disk.r, ax));
-        ay = Math.max(disk.r, Math.min(barFloorY(ax) - disk.r, ay));
-      }
-    }
-    anchor.x = ax;
-    anchor.y = ay;
-  }
+  // Spring (applies force for full dt before CCD).
   const ctrl = springDrag(disk, anchor, dt);
-  anchor.x = rawAnchorX;
-  anchor.y = rawAnchorY;
   if(ctrl.grabbed) clearPause();
 
-  const speed = Math.hypot(disk.vx, disk.vy);
-  if(!anchor.active && speed > 1e-6 && friction > 0){
-    const decel = speed * friction * dt * frameMultiplier;
-    const rawNewSpeed = speed - decel;
-    let newSpeed;
-    if(Math.sign(rawNewSpeed) !== Math.sign(speed)){
-      newSpeed = speed;
-    } else {
-      newSpeed = rawNewSpeed;
+  // Friction only when not held.
+  if(!anchor.active){
+    const speed = Math.hypot(disk.vx, disk.vy);
+    if(speed > 1e-6 && params.friction > 0){
+      const decel = speed * params.friction * dt * params.frameMultiplier;
+      const newSpeed = Math.max(0, speed - decel);
+      disk.vx *= newSpeed / speed;
+      disk.vy *= newSpeed / speed;
     }
-    const scale = newSpeed / speed;
-    disk.vx *= scale;
-    disk.vy *= scale;
   }
 
-  let nowBarContact = false;
+  let nowBarContact    = false;
   let nowBumperContact = false;
 
-  // Static-overlap snap (bar as floor): push disk up if it's inside the bar.
+  // Static overlap snap: bar.
   {
-    const floorY = barFloorY(disk.x);
-    if(disk.y + disk.r > floorY){
-      disk.y = floorY - disk.r;
-      if(disk.y - disk.r < 0) disk.y = disk.r;
+    const dist = barSignedDist(disk.x, disk.y);
+    if(dist < disk.r){
+      const { nx, ny } = barNormal();
+      disk.x += (disk.r - dist)*nx;
+      disk.y += (disk.r - dist)*ny;
       nowBarContact = true;
     }
   }
 
+  // Static overlap snap: bumper.
   if(USE_BUMPER && bumper.active){
-    const ddx = disk.x - bumper.x;
-    const ddy = disk.y - bumper.y;
+    const ddx = disk.x - bumper.x, ddy = disk.y - bumper.y;
     const Rsum = disk.r + bumper.r;
     const d2 = ddx*ddx + ddy*ddy;
-    if(d2 < Rsum * Rsum){
+    if(d2 < Rsum*Rsum){
       let nx, ny;
-      if(d2 > 1e-9){
-        const d = Math.sqrt(d2);
-        nx = ddx / d; ny = ddy / d;
-      } else {
-        nx = 0; ny = -1;
-      }
-      disk.x = bumper.x + nx * Rsum;
-      disk.y = bumper.y + ny * Rsum;
-      const minX = disk.r;
-      const maxX = canvas.width - disk.r;
-      const minY = disk.r;
-      const maxY = barFloorY(disk.x) - disk.r;
-      disk.x = Math.max(minX, Math.min(maxX, disk.x));
-      disk.y = Math.max(minY, Math.min(maxY, disk.y));
-      const fdx = disk.x - bumper.x;
-      const fdy = disk.y - bumper.y;
+      if(d2 > 1e-9){ const d = Math.sqrt(d2); nx = ddx/d; ny = ddy/d; }
+      else { nx = 0; ny = -1; }
+      disk.x = bumper.x + nx*Rsum;
+      disk.y = bumper.y + ny*Rsum;
+      disk.x = Math.max(disk.r, Math.min(canvas.width - disk.r, disk.x));
+      disk.y = Math.max(disk.r, Math.min(barFloorY(disk.x) - disk.r, disk.y));
+      const fdx = disk.x - bumper.x, fdy = disk.y - bumper.y;
       const fd2 = fdx*fdx + fdy*fdy;
-      if(fd2 < Rsum * Rsum){
+      if(fd2 < Rsum*Rsum){
         const fd = Math.sqrt(fd2) || 1;
-        bumper.x = disk.x - (fdx / fd) * Rsum;
-        bumper.y = disk.y - (fdy / fd) * Rsum;
+        bumper.x = disk.x - (fdx/fd)*Rsum;
+        bumper.y = disk.y - (fdy/fd)*Rsum;
       }
       nowBumperContact = true;
       notifyBumperHit();
     }
   }
 
+  // CCD loop: integrate to earliest collision, reflect, repeat.
   let remaining = dt;
   for(let iter = 0; iter < 4 && remaining > 0; iter++){
     const wallHit = timeToWalls(remaining);
     const bumperT = USE_BUMPER ? timeToBumper(remaining) : Infinity;
 
-    let t = remaining;
-    let kind = null;
+    let t = remaining, kind = null;
     if(wallHit.t < t){ t = wallHit.t; kind = wallHit.kind; }
-    if(bumperT < t){   t = bumperT;   kind = 'bumper';   }
+    if(bumperT  < t){ t = bumperT;   kind = 'bumper'; }
 
     disk.x += disk.vx * t;
     disk.y += disk.vy * t;
@@ -309,68 +255,72 @@ export function update(dt){
 
     if(USE_TRAIL && !anchor.active) tickTrail();
 
-    let bs;
+    let bs = 0;
     if(kind === 'bumper'){
       bs = reflectAtBumper();
       notifyBumperHit();
       nowBumperContact = true;
     } else if(kind === 'floor'){
-      // floor = bar — defer sound to rising-edge logic
-      bs = reflectAtWall(kind);
+      bs = reflectAtBar();
       nowBarContact = true;
     } else {
-      // left, right, top — play immediately
-      bs = reflectAtWall(kind);
-      if(bs > 0 && (!anchor.active || bs > MIN_SOUND_SPEED)){
+      if(kind === 'left' || kind === 'right'){
+        bs = Math.abs(disk.vx);
+        disk.vx *= -params.bounce;
+      } else {
+        bs = Math.abs(disk.vy);
+        disk.vy *= -params.bounce;
+      }
+      if(bs > 0){
         const intensity = Math.min(bs / MAX_BOUNCE_SPEED, 1);
         if(USE_CHIMES) playChime(intensity, noteFromY());
-        else playKnock(intensity);
+        else           playKnock(intensity);
       }
     }
+  }
 
-    if(anchor.active){
-      disk.vx *= ANCHOR_COLLISION_DAMPING;
-      disk.vy *= ANCHOR_COLLISION_DAMPING;
+  // Bar carries disk upward when bar is swept up.
+  if(nowBarContact && bar.vy < 0 && disk.vy > bar.vy){
+    disk.y = barFloorY(disk.x) - disk.r;
+    if(disk.y < disk.r) disk.y = disk.r;
+  }
+
+  // Defensive final overlap corrections.
+  {
+    const dist = barSignedDist(disk.x, disk.y);
+    if(dist < disk.r){
+      const { nx, ny } = barNormal();
+      disk.x += (disk.r - dist)*nx;
+      disk.y += (disk.r - dist)*ny;
+      nowBarContact = true;
     }
   }
+  if(disk.y < disk.r)                   disk.y = disk.r;
+  if(disk.x < disk.r)                   disk.x = disk.r;
+  if(disk.x + disk.r > canvas.width)    disk.x = canvas.width - disk.r;
 
-  // Bar-carries-disk pin: when bar moves up fast, keep disk flush against it.
-  if(nowBarContact && bar.vy < 0 && disk.vy > bar.vy){
-    const floorY = barFloorY(disk.x);
-    disk.y = floorY - disk.r;
-    if(disk.y - disk.r < 0) disk.y = disk.r;
-  }
-
-  // Defensive final overlap correction.
-  {
-    const floorY = barFloorY(disk.x);
-    if(disk.y + disk.r > floorY){ disk.y = floorY - disk.r; nowBarContact = true; }
-  }
-  if(disk.y - disk.r < 0) disk.y = disk.r;
-  if(disk.x - disk.r < 0) disk.x = disk.r;
-  if(disk.x + disk.r > canvas.width) disk.x = canvas.width - disk.r;
-
-
-  if(nowBarContact && !wasBarContact && (!anchor.active || Math.max(Math.abs(disk.vy), Math.abs(bar.vy)) > MIN_SOUND_SPEED)){
+  // Sound: rising-edge only (bar and bumper).
+  if(nowBarContact && !wasBarContact){
     const approach = Math.max(Math.abs(disk.vy), Math.abs(bar.vy));
     const intensity = Math.max(0.15, Math.min(approach / MAX_BOUNCE_SPEED, 1));
     if(USE_CHIMES) playChime(intensity, noteFromY());
-    else playKnock(intensity);
+    else           playKnock(intensity);
   }
-  if(nowBumperContact && !wasBumperContact && (!anchor.active || Math.hypot(disk.vx, disk.vy) > MIN_SOUND_SPEED)){
-    const approach = Math.hypot(disk.vx, disk.vy);
-    const intensity = Math.max(0.15, Math.min(approach / MAX_BOUNCE_SPEED, 1));
+  if(nowBumperContact && !wasBumperContact){
+    const intensity = Math.max(0.15, Math.min(Math.hypot(disk.vx, disk.vy) / MAX_BOUNCE_SPEED, 1));
     playKnock(intensity);
   }
-  wasBarContact = nowBarContact;
+  wasBarContact    = nowBarContact;
   wasBumperContact = nowBumperContact;
 
-  const bumperEvents = USE_BUMPER ? tickBumper() : { firstHit: false, placed: false, removed: false, removedAfterHit: false };
+  const bumperEvents = USE_BUMPER
+    ? tickBumper()
+    : { firstHit: false, placed: false, removed: false, removedAfterHit: false };
 
   if(USE_TARGETS) tickTargets(dt);
 
   if(USE_TRAIL){
-    if(ctrl.grabbed) pauseTrail();
+    if(ctrl.grabbed)  pauseTrail();
     if(ctrl.flung || barMoved || bumperEvents.firstHit || bumperEvents.removedAfterHit) resetTrail();
     if(!anchor.active) tickTrail();
   }
@@ -379,10 +329,6 @@ export function update(dt){
     const userInteracting = anchor.active || bar.dragging || bumperEvents.placed || bumperEvents.removed;
     if(userInteracting) idleTime = 0;
     else idleTime += dt;
-    if(idleTime >= IDLE_TIMEOUT){
-      disk.vx = 0;
-      disk.vy = 0;
-      idleTime = 0;
-    }
+    if(idleTime >= IDLE_TIMEOUT){ disk.vx = 0; disk.vy = 0; idleTime = 0; }
   }
 }

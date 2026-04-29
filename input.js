@@ -30,7 +30,8 @@ export function setupInput(){
     // Check bar hit first (must click directly on the bar).
     // barDown hook is checked regardless of bar.hidden so variants that draw
     // their own bar (hidden=true) can still intercept touches in the bar area.
-    const inBarBounds = p.y >= bar.y && p.y <= bar.y + bar.height;
+    const barBottom = (bar.y2 != null ? Math.max(bar.y1, bar.y2) : bar.y) + bar.height;
+    const inBarBounds = p.y >= bar.y && p.y <= barBottom;
     if(inBarBounds && inputHooks.barDown && inputHooks.barDown(p.x, p.y) === true){
       emptyEngaged = true; // reuse emptyEngaged so move/up route through emptyMove/emptyUp
       canvas.setPointerCapture(ev.pointerId);
