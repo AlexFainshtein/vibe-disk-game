@@ -3,8 +3,8 @@ import { disk, bar, anchor } from './playfield.js';
 import { playKnock, playChime } from './sound.js';
 import { tickTargets } from './alex-targets.js';
 import { tickBumper, bumper, notifyBumperHit } from './alex-bumper.js';
-import { tickTrail, pauseTrail, resetTrail, setTrailColor, resetTrailColor } from './alex-trail.js';
-import { clearPause, negatePausedVelocity } from './alex-pause.js';
+import { tickTrail, pauseTrail, resetTrail, setTrailColor, resetTrailColor, trailHasContent } from './alex-trail.js';
+import { clearPause, negatePausedVelocity, getPausedSpeed, scalePausedVelocity } from './alex-pause.js';
 import { createSpringDragController } from './controller-spring-drag.js';
 
 // Alex-specific color palette (overrides the warm defaults in playfield.js).
@@ -28,6 +28,16 @@ const SPRING_COLOR = '#aaaaaa';               // mid-gray — visible on both da
 // below it with the canvas bottom as the floor. This flips the wall collisions
 // in update() and the note mapping in noteFromY (compared to Eugene's bottom-bar layout).
 bar.layout = 'top';
+
+// Auto-drift intro: at startup the disk is given a small initial velocity so
+// it gently bounces around the playfield, producing occasional pentatonic
+// chimes when it hits walls. This signals to first-time users that the disk
+// is alive and touchable, without needing on-screen instructions; the user's
+// first grab naturally takes over (anchor activates and the spring physics
+// applies). We don't restore this on Reset — Reset reads as "stop everything
+// and start fresh" rather than "restart intro".
+disk.vx = 120;
+disk.vy = 80;
 
 // Disk-center marker + spring visualization. The center dot is *always*
 // visible (a permanent attachment-point indicator); the line and anchor dot
@@ -53,23 +63,32 @@ function drawSpringOverlay(c){
 }
 renderOverlays.push(drawSpringOverlay);
 
-// EXPERIMENT (throwaway): press R (or tap the Reverse button) to negate the
-// disk's velocity. Reverse mode toggles each press: odd presses paint the
-// trail in the (flat) BACKGROUND COLOR with full alpha — wherever the reverse
-// path crosses an existing forward stroke, the opaque background paint covers
-// the white, effectively *erasing* it. Even presses (the disk is back in its
-// original direction) restore the normal forward white trail. Reverse stroke
-// is slightly wider than forward so its antialiased edge fully blankets the
-// forward edge — without this, a hairline white halo of antialiased pixels
-// remains on the laptop (less visible on phones).
+// Erase / Draw toggle button (and the R key): press to flip the disk's
+// velocity and switch the trail's drawing mode. In "Draw" mode (default), new
+// trail strokes are white. In "Erase" mode, new strokes paint the canvas
+// background color slightly thicker than the forward 1.5 px stroke, so the
+// disk retracing its path overpaints (and effectively erases) the original
+// white trail. The button label toggles between "Erase" (the action available
+// when in Draw mode) and "Draw" (the action available when in Erase mode),
+// mirroring the Pause/Resume label pattern. Trail data is preserved across
+// presses; a roundtrip of presses leaves the visual trail re-drawn in white.
+//
+// Known caveat: once the disk has retraced past the end of the original white
+// trail, subsequent strokes are still drawn in background color and become
+// invisible. The user has to press Draw to come back to white. There's no
+// clean automatic exit (we don't know when "fully erased" finishes).
 //
 // Depends on a flat background — see state.js → screen.backgrounds.alex.
 //
-// To restore the colorful version (per-pass cycling magenta/cyan/gold with
-// normal compositing), replace doReverse() with the COLOR-CYCLE block below.
+// COLOR-CYCLE alternative (Pulse variant): each press cycles a new color on
+// the new trail (no erase mode). Commented out below.
 const REVERSE_TRAIL_COLOR = '#071018'; // matches the (flat) background in state.js
 const REVERSE_TRAIL_WIDTH = 3;          // wider than the forward 1.5 px to cover antialiased edges
 let reverseToggleOn = false;
+const reverseBtn = document.getElementById('reverseBtn');
+function setReverseLabel(){
+  if(reverseBtn) reverseBtn.textContent = reverseToggleOn ? 'Draw' : 'Erase';
+}
 function doReverse(){
   disk.vx = -disk.vx;
   disk.vy = -disk.vy;
@@ -80,29 +99,69 @@ function doReverse(){
   reverseToggleOn = !reverseToggleOn;
   if(reverseToggleOn) setTrailColor(REVERSE_TRAIL_COLOR, 'source-over', REVERSE_TRAIL_WIDTH);
   else                resetTrailColor();
+  setReverseLabel();
   // Seed the new segment at the disk's current position so the new trail
   // visually joins the end of the previous one (otherwise its first point
   // would be one integration step away in the reversed direction).
   tickTrail();
 }
-// COLOR-CYCLE alternative (preserved for easy restoration):
+// COLOR-CYCLE alternative (Pulse variant): each press flips velocity and
+// switches to the next color in a cycle (no erase mode — colors layer over
+// each other for a richer image).
 // const REVERSE_COLORS = ['rgba(255,90,200,0.60)','rgba(120,230,255,0.60)','rgba(255,220,80,0.60)'];
 // let reverseIdx = 0;
 // function doReverse(){
-//   disk.vx = -disk.vx; disk.vy = -disk.vy;
+//   disk.vx = -disk.vx; disk.vy = -disk.vy; negatePausedVelocity();
 //   setTrailColor(REVERSE_COLORS[reverseIdx]); tickTrail();
 //   reverseIdx = (reverseIdx + 1) % REVERSE_COLORS.length;
 // }
 window.addEventListener('keydown', (e) => {
   if(e.key === 'r' || e.key === 'R') doReverse();
 });
-const reverseBtn = document.getElementById('reverseBtn');
 reverseBtn?.addEventListener('pointerdown', (e) => e.stopPropagation()); // don't let the canvas see the tap
 reverseBtn?.addEventListener('click', doReverse);
 document.getElementById('resetDisk')?.addEventListener('click', () => {
   resetTrailColor();
   reverseToggleOn = false;
+  setReverseLabel();
 });
+
+// +/− speed controls. Each click scales the disk's velocity by a constant
+// factor (4/3 up, 3/4 down — inverses, so a +/− pair returns to the original
+// speed). Direction is preserved, so the trajectory pattern continues
+// undisturbed; only the magnitude changes. Also scales the saved paused
+// velocity so a Pause→+→Resume sequence resumes at the new speed.
+const SPEED_STEP_UP   = 3/2;
+const SPEED_STEP_DOWN = 2/3;
+function adjustSpeed(factor){
+  disk.vx *= factor;
+  disk.vy *= factor;
+  scalePausedVelocity(factor); // no-op if not paused
+}
+const fasterBtn = document.getElementById('fasterBtn');
+const slowerBtn = document.getElementById('slowerBtn');
+fasterBtn?.addEventListener('pointerdown', (e) => e.stopPropagation());
+fasterBtn?.addEventListener('click', () => adjustSpeed(SPEED_STEP_UP));
+slowerBtn?.addEventListener('pointerdown', (e) => e.stopPropagation());
+slowerBtn?.addEventListener('click', () => adjustSpeed(SPEED_STEP_DOWN));
+
+// Enable/disable the motion-modifying buttons (Reverse/Erase, +, −) based on
+// whether they have anything to act on. Common rule: needs motion (live or
+// paused velocity) AND not currently held — the spring drives disk.vx/vy
+// during a grab, which would flicker the buttons, and these actions have no
+// useful effect mid-grab anyway. Reverse adds one extra requirement: trail
+// must be non-empty (the experiment paints over an existing path).
+const MOVING_EPS = 0.5; // px/sec — below this is "effectively at rest"
+function updateButtonStates(){
+  const liveSpeed = Math.hypot(disk.vx, disk.vy);
+  const pausedSpeed = getPausedSpeed();
+  const hasMotion = liveSpeed > MOVING_EPS || pausedSpeed > MOVING_EPS;
+  const canControl = hasMotion && !anchor.active;
+  if(reverseBtn) reverseBtn.disabled = !(canControl && trailHasContent());
+  if(fasterBtn)  fasterBtn.disabled  = !canControl;
+  if(slowerBtn)  slowerBtn.disabled  = !canControl;
+}
+updateButtonStates(); // initial state at module load: no motion → all three disabled
 
 // Fade the "Wiggle the disk." hint after the first canvas pointerdown.
 // CSS handles the fade animation; { once: true } ensures we only fire once.
@@ -498,4 +557,6 @@ export function update(dt){
       idleTime = 0;
     }
   }
+
+  updateButtonStates();
 }

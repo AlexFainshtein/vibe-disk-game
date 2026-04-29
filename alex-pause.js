@@ -35,6 +35,12 @@ if(buttonRef){
   buttonRef.addEventListener('click', togglePause);
 }
 
+// Reset clears the pause state too — otherwise after Pause→Reset the button
+// stays labeled "▶ Resume" even though the disk has been reset to its center
+// at zero velocity, and clicking Resume would un-pause into a stale-but-zero
+// saved velocity. clearPause already handles paused=false + label refresh.
+document.getElementById('resetDisk')?.addEventListener('click', clearPause);
+
 export function clearPause(){
   if(!paused) return;
   paused = false;
@@ -54,4 +60,22 @@ export function negatePausedVelocity(){
   if(!paused) return;
   savedVx = -savedVx;
   savedVy = -savedVy;
+}
+
+// Speed of the saved (paused) velocity, or 0 if not paused. Used by the
+// Reverse-button enable/disable check: while paused, disk.vx/vy are zero
+// but the "real" velocity lives in savedVx/savedVy, and Reverse-while-paused
+// is a meaningful action — so the button stays enabled when this is nonzero.
+export function getPausedSpeed(){
+  if(!paused) return 0;
+  return Math.hypot(savedVx, savedVy);
+}
+
+// Multiply the saved velocity by a scalar. No-op if not paused. Lets the
+// +/− speed buttons in alex-physics adjust the disk's speed even while
+// paused, so a Pause→Faster→Resume sequence resumes at the new speed.
+export function scalePausedVelocity(factor){
+  if(!paused) return;
+  savedVx *= factor;
+  savedVy *= factor;
 }
