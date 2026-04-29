@@ -542,7 +542,13 @@ export function update(dt){
 
   if(USE_TRAIL){
     if(ctrl.grabbed) pauseTrail();
-    if(ctrl.flung || barMoved || bumperEvents.firstHit || bumperEvents.removedAfterHit) resetTrail();
+    // Trail resets on fling release and on bar movement. Bumper events used to
+    // reset it too (the design rationale was "placing/removing a bumper marks
+    // a new chapter"), but with auto-drift continuously producing a trail and
+    // the user wanting to keep complex trajectories that happen to encounter
+    // a bumper, that rule does more harm than good. The Erase/Draw button now
+    // gives the user explicit control over trail lifecycle.
+    if(ctrl.flung || barMoved) resetTrail();
     if(!anchor.active) tickTrail();
   }
 
