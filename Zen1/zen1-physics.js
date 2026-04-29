@@ -81,7 +81,7 @@ const USE_IDLE_RESET = false;
 const IDLE_TIMEOUT   = 60;
 
 // ─── Planck.js setup ─────────────────────────────────────────────────────────
-const { World, Vec2, Box, Circle, Edge, DistanceJoint } = planck;
+const { World, Vec2, Box, Circle, Edge, Polygon, DistanceJoint } = planck;
 
 export const PPM  = 64;
 export const toM  = px => px / PPM;
@@ -89,6 +89,7 @@ export const toPx = m  => m  * PPM;
 
 export let diskBody, anchorBody;
 let world, barBody, bumperBody;
+let barFixture = null;
 let springJoint = null;
 let wallTop, wallLeft, wallRight;
 
@@ -105,11 +106,6 @@ function makeEdgeWall(x1, y1, x2, y2){
   return b;
 }
 
-function barCentroidM(){
-  const cx = canvas.width  / 2;
-  const cy = (bar.y1 + bar.y2) / 2 + bar.height / 2;
-  return Vec2(toM(cx), toM(cy));
-}
 
 function initWorld(){
   const W = canvas.width, H = canvas.height;
@@ -120,11 +116,10 @@ function initWorld(){
   wallLeft  = makeEdgeWall(0, 0, 0, H);
   wallRight = makeEdgeWall(W, 0, W, H);
 
-  barBody = world.createBody({ type: 'kinematic', position: barCentroidM() });
-  barBody.createFixture(Box(toM(W / 2 + 4), toM(bar.height / 2 + 1)), {
-    restitution: 0,
-    friction:    0,
-  });
+  // Bar: static body at origin — fixture is a polygon matching the visual trapezoid
+  // exactly. Rebuilt via updateBarBody() whenever y1/y2 change.
+  barBody = world.createBody({ type: 'static', position: Vec2(0, 0) });
+  barFixture = null;
 
   bumperBody = world.createBody({
     type:     'kinematic',
@@ -151,6 +146,8 @@ function initWorld(){
   anchorBody = world.createBody({ type: 'static', position: Vec2(0, 0) });
 
   world.on('begin-contact', handleContact);
+
+  updateBarBody();  // build initial bar fixture
 }
 
 function handleContact(contact){
@@ -242,11 +239,21 @@ export function moveAnchor(x, y){
 }
 
 function updateBarBody(){
-  const target = barCentroidM();
-  const angle  = Math.atan2(bar.y2 - bar.y1, canvas.width);
-  barBody.setPosition(target);
-  barBody.setAngle(angle);
-  barBody.setLinearVelocity(Vec2(0, 0));
+  // Rebuild the polygon fixture to exactly match the visual trapezoid.
+  // Extend 10 px past each wall along the same slope so the tilt matches exactly.
+  if(barFixture) barBody.destroyFixture(barFixture);
+  const W  = canvas.width;
+  const s  = (bar.y2 - bar.y1) / W;  // slope px/px — same as visual
+  const mg = 10;                       // margin px past each wall
+  const tl = toM(bar.y1           - s * mg);
+  const tr = toM(bar.y2           + s * mg);
+  const bl = toM(bar.y1 + bar.height - s * mg);
+  const br = toM(bar.y2 + bar.height + s * mg);
+  const l  = toM(-mg), r = toM(W + mg);
+  barFixture = barBody.createFixture(
+    Polygon([ Vec2(l, tl), Vec2(r, tr), Vec2(r, br), Vec2(l, bl) ]),
+    { restitution: 0, friction: 0 }
+  );
 }
 
 function updateBumperBody(){
@@ -278,8 +285,8 @@ export function update(dt){
   diskBody.getFixtureList().setRestitution(held ? ANCHOR_BOUNCE : params.bounce);
   diskBody.setLinearDamping(held ? HOLD_DAMPING : params.friction * params.frameMultiplier);
 
-  // 3. Move kinematic bodies.
-  updateBarBody();
+  // 3. Rebuild bar fixture if the bar moved; always sync bumper.
+  if(barMoved) updateBarBody();
   updateBumperBody();
 
   // 4. Cache pre-step speed for sound intensity (handleContact reads this).

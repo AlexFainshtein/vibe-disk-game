@@ -71,7 +71,7 @@ bar.overlay = (c) => {
 let dragMode = null; // 'left' | 'right' | 'middle'
 let dragStartY = 0, dragStartY1 = 0, dragStartY2 = 0;
 
-const MIN_BAR_Y = () => disk.r * 3;
+const MIN_BAR_Y = () => disk.r * 2;
 const MAX_BAR_Y = () => canvas.height - bar.height;
 
 function clampEdge(y){ return Math.max(MIN_BAR_Y(), Math.min(MAX_BAR_Y(), y)); }
