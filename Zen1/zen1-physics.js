@@ -60,6 +60,7 @@ const MAX_BOUNCE_SPEED  = 1200;
 const SPRING_K          = 200;   // px/s² per px of displacement
 const PULL_DAMPING      = 8;     // viscous damping (F = −c·v) applied while spring is active
 const FLING_THRESHOLD   = 200;   // px/s — above this, release keeps velocity; below, freezes disk
+const ANCHOR_BOUNCE     = 1;//0.5;   // normal-only restitution while spring is active (softer wall hits)
 
 const USE_CHIMES     = true;
 const USE_TARGETS    = false;
@@ -112,34 +113,34 @@ function intersectorsAt(px, py){
   return hits;
 }
 
-function applyReflection(kind){
+function applyReflection(kind, bounce){
   switch(kind){
-    case 'left':   { const s = Math.abs(disk.vx); disk.vx =  s * params.bounce; return s; }
-    case 'right':  { const s = Math.abs(disk.vx); disk.vx = -s * params.bounce; return s; }
-    case 'top':    { const s = Math.abs(disk.vy); disk.vy =  s * params.bounce; return s; }
-    case 'floor':  return reflectAtBar();
-    case 'bumper': return reflectAtBumper();
+    case 'left':   { const s = Math.abs(disk.vx); disk.vx =  s * bounce; return s; }
+    case 'right':  { const s = Math.abs(disk.vx); disk.vx = -s * bounce; return s; }
+    case 'top':    { const s = Math.abs(disk.vy); disk.vy =  s * bounce; return s; }
+    case 'floor':  return reflectAtBar(bounce);
+    case 'bumper': return reflectAtBumper(bounce);
   }
   return 0;
 }
 
-function reflectAtBar(){
+function reflectAtBar(bounce){
   const { nx, ny } = barNormal();
   const vDotN = disk.vx*nx + disk.vy*ny;
   if(vDotN >= 0) return 0;
-  const factor = (1 + params.bounce) * vDotN;
+  const factor = (1 + bounce) * vDotN;
   disk.vx -= factor*nx;
   disk.vy -= factor*ny;
   return Math.abs(vDotN);
 }
 
-function reflectAtBumper(){
+function reflectAtBumper(bounce){
   const dx = disk.x - bumper.x, dy = disk.y - bumper.y;
   const dist = Math.hypot(dx, dy) || 1;
   const nx = dx/dist, ny = dy/dist;
   const vDotN = disk.vx*nx + disk.vy*ny;
   if(vDotN >= 0) return 0;
-  const factor = (1 + params.bounce) * vDotN;
+  const factor = (1 + bounce) * vDotN;
   disk.vx -= factor*nx;
   disk.vy -= factor*ny;
   return Math.abs(vDotN);
@@ -214,13 +215,16 @@ export function update(dt){
   let nowBumperContact = false;
 
   // Binary-search CCD loop.
-  let remaining = dt;
+  let remaining  = dt;
+  let skipSpring = false; // suppressed for the substep of a collision and the one after
   for(let iter = 0; iter < 8 && remaining > 1e-9; iter++){
     const x0 = disk.x, y0 = disk.y;
     const vx0 = disk.vx, vy0 = disk.vy;
-    // Recompute spring accel at current position each substep.
-    const sax = anchor.active ? SPRING_K * (anchor.x - disk.x) : 0;
-    const say = anchor.active ? SPRING_K * (anchor.y - disk.y) : 0;
+    // Spring accel — skipped for one substep after any collision.
+    const applySpring = anchor.active && !skipSpring;
+    skipSpring = false; // consumed; a new collision will re-arm it
+    const sax = applySpring ? SPRING_K * (anchor.x - disk.x) : 0;
+    const say = applySpring ? SPRING_K * (anchor.y - disk.y) : 0;
 
     // Probe end-of-step position (linear — consistent with binary search below).
     const xE = x0 + vx0 * remaining;
@@ -236,6 +240,29 @@ export function update(dt){
       }
       disk.x = xE;
       disk.y = yE;
+      // Contact constraint: if at a surface and new velocity points into it, zero that
+      // component. This is the normal force the surface provides — prevents the spring
+      // from accumulating into-surface velocity on a stationary ball that's touching.
+      {
+        const dist = barSignedDist(disk.x, disk.y);
+        if(dist < disk.r + 1){
+          const { nx, ny } = barNormal();
+          const vn = disk.vx*nx + disk.vy*ny;
+          if(vn < 0){ disk.vx -= vn*nx; disk.vy -= vn*ny; }
+        }
+      }
+      if(USE_BUMPER && bumper.active){
+        const ddx = disk.x - bumper.x, ddy = disk.y - bumper.y;
+        const dd = Math.hypot(ddx, ddy);
+        if(dd > 1e-9 && dd < disk.r + bumper.r + 1){
+          const nx = ddx/dd, ny = ddy/dd;
+          const vn = disk.vx*nx + disk.vy*ny;
+          if(vn < 0){ disk.vx -= vn*nx; disk.vy -= vn*ny; }
+        }
+      }
+      if(disk.x - disk.r              < 1 && disk.vx < 0) disk.vx = 0;
+      if(canvas.width - disk.x - disk.r < 1 && disk.vx > 0) disk.vx = 0;
+      if(disk.y - disk.r              < 1 && disk.vy < 0) disk.vy = 0;
       break;
     }
 
@@ -262,19 +289,19 @@ export function update(dt){
     // tHi ≈ 0 means disk is stationary at the boundary — nothing to do.
     if(tHi < 1e-9) break;
 
-    // Commit to contact point.
-    disk.vx = vx0 + sax * tHi;
-    disk.vy = vy0 + say * tHi;
-    if(anchor.active){
-      disk.vx *= Math.max(0, 1 - PULL_DAMPING * tHi);
-      disk.vy *= Math.max(0, 1 - PULL_DAMPING * tHi);
-    }
-    disk.x = x0 + vx0 * tHi;
-    disk.y = y0 + vy0 * tHi;
+    // Commit position to contact point; reflect pre-spring velocity.
+    // Spring delta-v is skipped: it would add velocity into the surface which
+    // the reflection immediately bounces back out, injecting energy each frame.
+    // Spring and damping act on the reflected velocity in the next substep.
+    disk.x  = x0 + vx0 * tHi;
+    disk.y  = y0 + vy0 * tHi;
+    disk.vx = vx0;
+    disk.vy = vy0;
 
     // Analytic reflection off the single hit object.
-    const kind = hitObjs[0];
-    const bs   = applyReflection(kind);
+    const kind   = hitObjs[0];
+    const bounce = anchor.active ? ANCHOR_BOUNCE : params.bounce;
+    const bs     = applyReflection(kind, bounce);
 
     if(USE_TRAIL && !anchor.active) tickTrail();
 
@@ -291,6 +318,7 @@ export function update(dt){
       }
     }
 
+    skipSpring = true; // suppress spring in the next substep too
     remaining -= tHi;
   }
 
