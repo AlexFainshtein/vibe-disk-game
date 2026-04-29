@@ -10,6 +10,7 @@ copy alex-targets.js public\
 copy alex-bumper.js public\
 copy alex-trail.js public\
 copy alex-pause.js public\
+copy og-preview.png public\
 copy controller-spring-drag.js public\
 copy eugene-physics.js public\
 copy eugene-bricks.js public\
