@@ -1,12 +1,19 @@
-import { canvas, ctx, screen, renderExtras } from './state.js';
+import { canvas, ctx, screen, renderExtras, renderOverlays } from './state.js';
 import { disk, bar } from './playfield.js';
 
 // Draws the playfield primitives shared by every variant: background, feature
-// extras (trail, bumper, bricks, etc.), bar, disk, shadow, highlight, debug
-// click ring. Variant-specific visuals are pushed into renderExtras by their
-// owning modules and drawn *underneath* the bar so the bar reads as the
-// topmost playfield-furniture object (matching its interactive priority — the
-// user can grab the bar even when a bumper is visually beneath it).
+// extras (trail, bumper, bricks, etc.), bar, and the disk. The disk renders
+// as a flat fill by default; setting `disk.highlight` opts into the 3D "ball"
+// look — drop shadow + radial gradient + specular ellipse, all three gated on
+// disk.highlight so they revive together. `disk.glass` triggers the
+// soap-bubble look used when Eugene's disk hits the bar.
+//
+// Variant-specific visuals are pushed into renderExtras by their owning
+// modules and drawn *underneath* the bar so the bar reads as the topmost
+// playfield-furniture object (matching its interactive priority — the user
+// can grab the bar even when a bumper is visually beneath it). Visuals that
+// must sit *on top of* the disk (e.g. Alex's spring line + endpoint dots) go
+// into renderOverlays instead, drawn last.
 
 export function draw(){
   const W = canvas.width, H = canvas.height;
@@ -42,11 +49,14 @@ export function draw(){
   // Always call overlay so hidden variants can draw their own bar entirely.
   bar.overlay?.(ctx);
 
-  // shadow
-  ctx.beginPath();
-  ctx.fillStyle = 'rgba(0,0,0,0.25)';
-  ctx.ellipse(disk.x+6,disk.y+8,disk.r*0.95,disk.r*0.5,0,0,Math.PI*2);
-  ctx.fill();
+  // shadow — only in 3D ball mode (gated on disk.highlight, same flag that
+  // turns on the radial gradient + specular ellipse below)
+  if(disk.highlight){
+    ctx.beginPath();
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.ellipse(disk.x+6,disk.y+8,disk.r*0.95,disk.r*0.5,0,0,Math.PI*2);
+    ctx.fill();
+  }
 
   // disk
   ctx.beginPath();
@@ -83,10 +93,17 @@ export function draw(){
     ctx.fill();
   }
 
-  // highlight
-  ctx.beginPath();
-  ctx.fillStyle = disk.glass ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.06)';
-  ctx.ellipse(disk.x - disk.r*0.25, disk.y - disk.r*0.35, disk.r*0.45, disk.r*0.25, -0.5, 0, Math.PI*2);
-  ctx.fill();
+  // specular highlight ellipse — small white blob in the upper-left, completing
+  // the 3D ball illusion. Drawn for the bubble (bright, opaque) and for the
+  // 3D ball (faint). A flat disc (no highlight, no glass) skips it.
+  if(disk.glass || disk.highlight){
+    ctx.beginPath();
+    ctx.fillStyle = disk.glass ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.06)';
+    ctx.ellipse(disk.x - disk.r*0.25, disk.y - disk.r*0.35, disk.r*0.45, disk.r*0.25, -0.5, 0, Math.PI*2);
+    ctx.fill();
+  }
 
+  // feature-supplied overlays (Alex's spring line + center marker, ...). Drawn
+  // last so they sit on top of the disk.
+  for(const fn of renderOverlays) fn(ctx);
 }

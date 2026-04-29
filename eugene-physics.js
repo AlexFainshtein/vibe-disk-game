@@ -10,6 +10,11 @@ import {
 } from './eugene-config.js';
 
 setDiskRadiusFraction(DISK_RADIUS_FRACTION);
+// Match disk.highlight to disk.color so render.js's 3D-ball gate fires
+// (drop shadow + specular ellipse). Equal stops make the radial gradient
+// render as a uniform fill — visually identical to the previous behavior,
+// when shadow + specular were drawn unconditionally regardless of highlight.
+disk.highlight = disk.color;
 inputHooks.diskGrab = false;
 bar.hidden = true;
 

@@ -1,29 +1,45 @@
-import { canvas, params, renderExtras } from './state.js';
+import { canvas, params, renderOverlays } from './state.js';
 import { disk, bar, anchor } from './playfield.js';
 import { playKnock, playChime } from './sound.js';
 import { tickTargets } from './alex-targets.js';
 import { tickBumper, bumper, notifyBumperHit } from './alex-bumper.js';
 import { tickTrail, pauseTrail, resetTrail, setTrailColor, resetTrailColor } from './alex-trail.js';
-import { clearPause } from './alex-pause.js';
+import { clearPause, negatePausedVelocity } from './alex-pause.js';
 import { createSpringDragController } from './controller-spring-drag.js';
 
 // Alex-specific color palette (overrides the warm defaults in playfield.js).
 // Background gradient is set in state.js (screen.backgrounds.alex).
-// Monochrome: the disk reads as a "ball" via a radial gradient (light highlight
-// at upper-left → mid-gray edge). The trail is the disk's translucent echo
-// (rgba 255,255,255,0.28 in alex-trail.js); the spring line is mid-gray as
-// the only non-white element on the playfield.
-disk.color     = '#888888'; // edge / shaded side of the ball
-disk.highlight = '#e8e8e8'; // bright spot (light source from upper-left)
-bar.color      = '#3a4a66'; // dark slate — playfield furniture, shared with the bumper
-const SPRING_COLOR = '#aaaaaa'; // mid-gray — visible on both dark background and white disk
+// Monochrome: a flat gray disc on a dark background — no 3D treatment, since
+// the ball was the only 3D-looking object in an otherwise flat game. The trail
+// is the disk's translucent echo (rgba 255,255,255,0.28 in alex-trail.js); the
+// spring line is mid-gray, visible against both the dark background and the
+// gray disc.
+//
+// To revive the 3D "ball" look (drop shadow + radial gradient highlight at
+// upper-left + specular ellipse — render.js gates all three on disk.highlight),
+// uncomment the disk.highlight line below. Tuned values preserved here for the
+// eventual colorful version.
+disk.color     = '#888888';                   // flat disc fill
+// disk.highlight = '#e8e8e8';                // 3D ball: bright spot at upper-left
+bar.color      = '#3a4a66';                   // dark slate — playfield furniture, shared with the bumper
+const SPRING_COLOR = '#aaaaaa';               // mid-gray — visible on both dark background and gray disc
 
 // Alex's bar lives at the top of the canvas as a movable ceiling; the disk lives
 // below it with the canvas bottom as the floor. This flips the wall collisions
 // in update() and the note mapping in noteFromY (compared to Eugene's bottom-bar layout).
 bar.layout = 'top';
 
-function drawSpringLine(c){
+// Disk-center marker + spring visualization. The center dot is *always*
+// visible (a permanent attachment-point indicator); the line and anchor dot
+// only appear while the user holds the disk. On desktop the center dot is
+// steadily visible; on mobile the finger usually covers it during a hold and
+// it flashes through after release. Rendered as an overlay so it sits on top
+// of the disk.
+function drawSpringOverlay(c){
+  c.fillStyle = SPRING_COLOR;
+  c.beginPath();
+  c.arc(disk.x, disk.y, 5, 0, Math.PI*2);
+  c.fill();
   if(!anchor.active) return;
   c.beginPath();
   c.moveTo(anchor.x, anchor.y);
@@ -33,10 +49,9 @@ function drawSpringLine(c){
   c.stroke();
   c.beginPath();
   c.arc(anchor.x, anchor.y, 5, 0, Math.PI*2);
-  c.fillStyle = SPRING_COLOR;
   c.fill();
 }
-renderExtras.push(drawSpringLine);
+renderOverlays.push(drawSpringOverlay);
 
 // EXPERIMENT (throwaway): press R (or tap the Reverse button) to negate the
 // disk's velocity. Reverse mode toggles each press: odd presses paint the
@@ -58,6 +73,10 @@ let reverseToggleOn = false;
 function doReverse(){
   disk.vx = -disk.vx;
   disk.vy = -disk.vy;
+  // If the disk is paused, its real velocity lives in alex-pause.js's saved
+  // velocity (disk.vx/vy are zero). Flip that too so a Resume after Reverse
+  // resumes in the reversed direction.
+  negatePausedVelocity();
   reverseToggleOn = !reverseToggleOn;
   if(reverseToggleOn) setTrailColor(REVERSE_TRAIL_COLOR, 'source-over', REVERSE_TRAIL_WIDTH);
   else                resetTrailColor();
@@ -94,6 +113,15 @@ if(uiHint){
 
 const MAX_BOUNCE_SPEED = 1200;
 
+// While the user holds the disk, walls/bar/bumper use a softer bounce
+// coefficient than free-flying collisions. A stretched spring can push the
+// disk into an obstacle at high speed but tiny displacement, where viscous
+// damping does very little work per cycle — without this, the disk buzzes
+// indefinitely against the obstacle. SPRING_BOUNCE bleeds enough energy off
+// each contact that the disk settles quickly. Free-flying behavior on release
+// is unchanged (anchor.active is false then, so params.bounce applies).
+const SPRING_BOUNCE = 0.2;
+
 const USE_CHIMES = true;            // pentatonic chime on bounce instead of knock
 const USE_TARGETS = false;          // soft regenerating targets — shelved for now (set true to re-enable)
 const USE_BUMPER = true;            // touch empty space to spawn a bumper that the disk collides with
@@ -112,14 +140,18 @@ const springDrag = createSpringDragController({
 
 let idleTime = 0;
 
-// Rising-edge tracking for "first contact" sounds. The bar and bumper play
-// their respective sound (chime / knock) on the transition from "not in
-// contact" to "in contact" — a continuous push (bar dragging into a stationary
-// disk, or disk wedged against a placed bumper) is silent after the first
-// frame. Both flags get refreshed each frame from BOTH the static-snap and
-// the TOI loop (a dynamic collision counts as contact too).
+// Rising-edge tracking for "first contact" sounds. Bar, bumper, and any
+// wall/floor play their respective sound (chime / knock) on the transition
+// from "not in contact" to "in contact" — a continuous push (bar dragging
+// into a stationary disk, disk wedged against a placed bumper, or disk
+// pressed into a wall by the spring) is silent after the first frame. Bar
+// and bumper flags get refreshed from BOTH the static-snap and the TOI loop;
+// the wall flag is set only by TOI hits (walls have no static-snap
+// counterpart). The single combined wall flag means corner hits or rapid
+// left↔right bouncing collapse to one sound per first-contact frame.
 let wasBarContact = false;
 let wasBumperContact = false;
+let wasWallContact = false;
 
 // Map disk vertical position at bounce time to one of 5 pentatonic notes.
 // With the bar at the top acting as ceiling: touching the bar → 4 (highest),
@@ -194,11 +226,11 @@ function timeToBumper(dtRemaining){
   return t;
 }
 
-function reflectAtWall(kind){
+function reflectAtWall(kind, bounce){
   let bs = 0;
   if(kind === 'left' || kind === 'right'){
     bs = Math.abs(disk.vx);
-    disk.vx *= -params.bounce;
+    disk.vx *= -bounce;
   } else if(kind === 'floor' || kind === 'ceiling'){
     bs = Math.abs(disk.vy);
     // No-kick model: the bar acts as a static surface for reflection. The
@@ -206,12 +238,12 @@ function reflectAtWall(kind){
     // update() (which kinematically carries the disk along) — so we don't
     // inject the bar's velocity into the disk on collision. This stops the
     // runaway-acceleration spiral that the old `+ 2*bar.vy` formula caused.
-    disk.vy *= -params.bounce;
+    disk.vy *= -bounce;
   }
   return bs;
 }
 
-function reflectAtBumper(){
+function reflectAtBumper(bounce){
   // disk is at the moment of contact (just touching the bumper). Reflect
   // velocity across the contact normal. Returns the bounce speed (|v·n|).
   const dx = disk.x - bumper.x;
@@ -221,7 +253,7 @@ function reflectAtBumper(){
   const ny = dy / dist;
   const vDotN = disk.vx * nx + disk.vy * ny;
   if(vDotN >= 0) return 0; // already separating (defensive — shouldn't happen if TOI > 0)
-  const factor = (1 + params.bounce) * vDotN;
+  const factor = (1 + bounce) * vDotN;
   disk.vx -= factor * nx;
   disk.vy -= factor * ny;
   return Math.abs(vDotN);
@@ -257,12 +289,17 @@ export function update(dt){
     disk.vy *= scale;
   }
 
-  // Track whether bar / bumper are in contact with the disk this frame. Both
-  // the static-snap pass below AND a dynamic TOI hit can set these — sound
-  // plays only on the rising edge (was-not → now-is), so a continuous push
-  // is silent after the first contact.
+  // Track whether bar / bumper / any-wall are in contact with the disk this
+  // frame. Bar and bumper flags are set by both the static-snap pass below
+  // AND a dynamic TOI hit; the wall flag is set only by TOI hits. Sound plays
+  // only on the rising edge (was-not → now-is), so a continuous push is
+  // silent after the first contact. frameWallBs records the strongest pre-
+  // reflection wall-impact speed seen this frame, used for the wall sound's
+  // intensity at rising-edge time.
   let nowBarContact = false;
   let nowBumperContact = false;
+  let nowWallContact = false;
+  let frameWallBs = 0;
 
   // === Static-overlap snap (bar) ============================================
   // If the bar (acting as ceiling) overlaps the disk's current position, push
@@ -337,6 +374,9 @@ export function update(dt){
   // iterations to defend against pathological cases (e.g. disk wedged in a
   // corner). Sound for ceiling and bumper hits is suppressed here — both go
   // through the rising-edge logic at the end of update().
+  // Soft bounce while the spring is held, normal bounce when free — see
+  // SPRING_BOUNCE comment for why.
+  const bounceCoeff = anchor.active ? SPRING_BOUNCE : params.bounce;
   let remaining = dt;
   for(let iter = 0; iter < 4 && remaining > 0; iter++){
     const wallHit = timeToWalls(remaining);
@@ -358,23 +398,21 @@ export function update(dt){
 
     let bs;
     if(kind === 'bumper'){
-      bs = reflectAtBumper();
+      bs = reflectAtBumper(bounceCoeff);
       notifyBumperHit();
       nowBumperContact = true;
       // sound deferred to rising-edge logic below
     } else if(kind === 'ceiling'){
-      bs = reflectAtWall(kind);
+      bs = reflectAtWall(kind, bounceCoeff);
       nowBarContact = true;
       // sound deferred to rising-edge logic below
     } else {
-      // left, right, floor — these have no static-push counterpart, so play
-      // the chime / knock immediately on the dynamic hit.
-      bs = reflectAtWall(kind);
-      if(bs > 0){
-        const intensity = Math.min(bs / MAX_BOUNCE_SPEED, 1);
-        if(USE_CHIMES) playChime(intensity, noteFromY());
-        else playKnock(intensity);
-      }
+      // left, right, floor — set the wall-contact flag and defer sound to
+      // the rising-edge logic below. Without this gating the spring pressing
+      // the disk into a wall would re-trigger a sound every frame.
+      bs = reflectAtWall(kind, bounceCoeff);
+      if(bs > frameWallBs) frameWallBs = bs;
+      nowWallContact = true;
     }
   }
 
@@ -407,7 +445,7 @@ export function update(dt){
     if(disk.x + disk.r > canvas.width) disk.x = canvas.width - disk.r;
   }
 
-  // === Rising-edge sounds (bar + bumper) ====================================
+  // === Rising-edge sounds (bar + bumper + walls/floor) ======================
   if(nowBarContact && !wasBarContact){
     // First contact this episode. Intensity from the larger of disk and bar
     // approach speeds so a slow disk hitting a fast-moving bar still chimes
@@ -424,8 +462,18 @@ export function update(dt){
     const intensity = Math.max(0.15, Math.min(approach / MAX_BOUNCE_SPEED, 1));
     playKnock(intensity);
   }
+  if(nowWallContact && !wasWallContact && frameWallBs > 0){
+    // First wall/floor contact this episode. Intensity uses the strongest
+    // pre-reflection impact speed seen this frame, so corner hits sound
+    // proportionate to the harder hit. No 0.15 floor: walls have no
+    // "placement-into-disk" case where approach speed is artificially zero.
+    const intensity = Math.min(frameWallBs / MAX_BOUNCE_SPEED, 1);
+    if(USE_CHIMES) playChime(intensity, noteFromY());
+    else playKnock(intensity);
+  }
   wasBarContact = nowBarContact;
   wasBumperContact = nowBumperContact;
+  wasWallContact = nowWallContact;
 
   // Bumper events still need to be polled — `placed`, `removed`, `firstHit`,
   // `removedAfterHit` are updated by user input + notifyBumperHit() above.

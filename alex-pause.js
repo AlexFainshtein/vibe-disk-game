@@ -44,3 +44,14 @@ export function clearPause(){
 export function isPaused(){
   return paused;
 }
+
+// Negate the saved velocity (only meaningful while paused — when the disk's
+// vx/vy are zeroed and the "real" velocity lives in savedVx/savedVy). Lets
+// alex-physics's doReverse keep the saved velocity in sync with the user's
+// reverse intent, so a Pause→Reverse→Resume sequence correctly resumes in
+// the reversed direction.
+export function negatePausedVelocity(){
+  if(!paused) return;
+  savedVx = -savedVx;
+  savedVy = -savedVy;
+}

@@ -31,8 +31,14 @@ export const params = {
 };
 
 // render extension points: feature modules push (ctx) => void callbacks here.
-// render.js calls them after the bar and before the disk so extras sit in the playfield, behind the disk.
+// renderExtras runs early — after the background, before the bar and disk —
+// so its visuals sit in the playfield, behind everything (bumper, trail,
+// bricks, mallet, bubble pop, ...).
+// renderOverlays runs last — after the disk — so its visuals sit on top of
+// everything in the playfield (e.g. Alex's spring line from anchor to disk
+// center, which needs to be visible across the disk while held).
 export const renderExtras = [];
+export const renderOverlays = [];
 
 // input extension points: feature modules can register handlers for touches on empty space
 // (i.e. neither the bar nor the disk). emptyDown returns true to capture the pointer for subsequent move/up.

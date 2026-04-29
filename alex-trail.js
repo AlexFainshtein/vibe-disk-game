@@ -1,4 +1,4 @@
-import { renderExtras } from './state.js';
+import { renderOverlays } from './state.js';
 import { disk } from './playfield.js';
 
 const TRAIL_COLOR = 'rgba(255, 255, 255, 0.28)';
@@ -36,7 +36,7 @@ function drawTrail(c){
 function init(){
   if(initialized) return;
   initialized = true;
-  renderExtras.push(drawTrail);
+  renderOverlays.push(drawTrail);
   // Reset wipes the trail — "Reset" reads as "wipe everything and start fresh",
   // and a preserved trail with the disk teleported back to center feels weird
   // (trajectory of a thing that's no longer there). Pause is the "preserve
