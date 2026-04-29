@@ -1,5 +1,5 @@
 import { canvas, params, renderExtras } from '../state.js';
-import { disk, bar, anchor } from '../playfield.js';
+import { disk, bar } from '../playfield.js';
 import { playKnock, playChime } from '../sound.js';
 import { tickTargets } from './zen1-targets.js';
 import { tickBumper, bumper, notifyBumperHit } from './zen1-bumper.js';
@@ -17,15 +17,17 @@ const SPRING_COLOR = '#aaaaaa';
 bar.layout = 'bottom';
 
 function drawSpringLine(c){
-  if(!anchor.active) return;
+  if(!springJoint) return;
+  const ap = anchorBody.getPosition();
+  const dp = diskBody.getPosition();
   c.beginPath();
-  c.moveTo(anchor.x, anchor.y);
-  c.lineTo(disk.x, disk.y);
+  c.moveTo(toPx(ap.x), toPx(ap.y));
+  c.lineTo(toPx(dp.x), toPx(dp.y));
   c.strokeStyle = SPRING_COLOR;
   c.lineWidth = 2;
   c.stroke();
   c.beginPath();
-  c.arc(anchor.x, anchor.y, 5, 0, Math.PI*2);
+  c.arc(toPx(ap.x), toPx(ap.y), 5, 0, Math.PI*2);
   c.fillStyle = SPRING_COLOR;
   c.fill();
 }
@@ -35,8 +37,9 @@ const REVERSE_TRAIL_COLOR = '#071018';
 const REVERSE_TRAIL_WIDTH = 3;
 let reverseToggleOn = false;
 function doReverse(){
-  disk.vx = -disk.vx;
-  disk.vy = -disk.vy;
+  const vel = diskBody.getLinearVelocity();
+  diskBody.setLinearVelocity(Vec2(-vel.x, -vel.y));
+  diskBody.setAwake(true);
   reverseToggleOn = !reverseToggleOn;
   if(reverseToggleOn) setTrailColor(REVERSE_TRAIL_COLOR, 'source-over', REVERSE_TRAIL_WIDTH);
   else                resetTrailColor();
@@ -49,6 +52,10 @@ const reverseBtn = document.getElementById('reverseBtn');
 reverseBtn?.addEventListener('pointerdown', (e) => e.stopPropagation());
 reverseBtn?.addEventListener('click', doReverse);
 document.getElementById('resetDisk')?.addEventListener('click', () => {
+  diskBody.setPosition(Vec2(toM(canvas.width / 2), toM(canvas.height / 2)));
+  diskBody.setLinearVelocity(Vec2(0, 0));
+  diskBody.setAwake(true);
+  if(springJoint) destroySpringJoint();
   resetTrailColor();
   reverseToggleOn = false;
 });
@@ -59,11 +66,12 @@ if(uiHint){
 }
 
 // ─── Physics constants ────────────────────────────────────────────────────────
-const MAX_BOUNCE_SPEED  = 1200;  // px/s — caps sound intensity normalisation
-const SPRING_FREQ_HZ    = 4;     // DistanceJoint spring frequency (higher = stiffer)
-const SPRING_DAMP_RATIO = 0.7;   // DistanceJoint damping ratio (0 = oscillates, 1 = critical)
-const FLING_THRESHOLD   = 200;   // px/s — below this, release freezes disk
-const ANCHOR_BOUNCE     = 0.5;   // restitution while spring is active (softer)
+const MAX_BOUNCE_SPEED  = 1200;
+const SPRING_FREQ_HZ    = 4;
+const SPRING_DAMP_RATIO = 0.7;
+const FLING_THRESHOLD   = 200;
+const ANCHOR_BOUNCE     = 0.5;
+const HOLD_DAMPING      = 5;
 
 const USE_CHIMES     = true;
 const USE_TARGETS    = false;
@@ -73,20 +81,17 @@ const USE_IDLE_RESET = false;
 const IDLE_TIMEOUT   = 60;
 
 // ─── Planck.js setup ─────────────────────────────────────────────────────────
-// planck is loaded as a UMD global via the <script> tag in zen1.html.
 const { World, Vec2, Box, Circle, Edge, DistanceJoint } = planck;
 
-// Unit conversion: Planck/Box2D works in metres; the game works in pixels.
-const PPM    = 64;                  // pixels per metre
-const toM    = px => px / PPM;
-const toPx   = m  => m  * PPM;
+export const PPM  = 64;
+export const toM  = px => px / PPM;
+export const toPx = m  => m  * PPM;
 
-let world, diskBody, barBody, bumperBody, anchorBody;
+export let diskBody, anchorBody;
+let world, barBody, bumperBody;
 let springJoint = null;
 let wallTop, wallLeft, wallRight;
 
-// Contact flags set inside the begin-contact listener (which fires during world.step).
-// preStepSpeed is written just before world.step so the listener can use it.
 let nowBarContact    = false;
 let nowBumperContact = false;
 let preStepSpeed     = 0;
@@ -111,20 +116,16 @@ function initWorld(){
 
   world = World({ gravity: Vec2(0, 0) });
 
-  // Walls: four infinitely-thin edge bodies.  No tunneling risk regardless of speed.
   wallTop   = makeEdgeWall(0, 0, W, 0);
   wallLeft  = makeEdgeWall(0, 0, 0, H);
   wallRight = makeEdgeWall(W, 0, W, H);
-  // Bottom "wall" is the bar — see barBody below.
 
-  // Bar: kinematic box.  Width is padded so the disk can never escape around the ends.
   barBody = world.createBody({ type: 'kinematic', position: barCentroidM() });
   barBody.createFixture(Box(toM(W / 2 + 4), toM(bar.height / 2 + 1)), {
     restitution: 0,
     friction:    0,
   });
 
-  // Bumper: kinematic circle (active flag checked each frame).
   bumperBody = world.createBody({
     type:     'kinematic',
     position: Vec2(toM(bumper.x), toM(bumper.y)),
@@ -134,13 +135,12 @@ function initWorld(){
     friction:    0,
   });
 
-  // Disk: dynamic bullet circle (CCD enabled).
   diskBody = world.createBody({
-    type:           'dynamic',
-    position:       Vec2(toM(disk.x), toM(disk.y)),
-    bullet:         true,     // CCD — no tunneling at high speeds
-    linearDamping:  0,        // friction applied manually each frame
-    fixedRotation:  true,     // disk never visually rotates
+    type:          'dynamic',
+    position:      Vec2(toM(canvas.width / 2), toM(canvas.height / 2)),
+    bullet:        true,
+    linearDamping: 0,
+    fixedRotation: true,
   });
   diskBody.createFixture(Circle(toM(disk.r)), {
     restitution: params.bounce,
@@ -148,10 +148,8 @@ function initWorld(){
     friction:    0,
   });
 
-  // Ghost body for the spring anchor — no fixture, just a joint endpoint.
   anchorBody = world.createBody({ type: 'static', position: Vec2(0, 0) });
 
-  // Collision sound listener.
   world.on('begin-contact', handleContact);
 }
 
@@ -171,7 +169,6 @@ function handleContact(contact){
       nowBumperContact = true;
     }
   } else {
-    // Wall hit — play sound immediately (walls don't need rising-edge debounce).
     if(intensity > 0){
       if(USE_CHIMES) playChime(Math.max(0.15, intensity), noteFromY());
       else           playKnock(intensity);
@@ -179,19 +176,21 @@ function handleContact(contact){
   }
 }
 
-// Initialise the world once at module load.
-// zen1-bar.js (imported above) sets bar.y1 / bar.y2 synchronously, so the
-// bar geometry is ready by the time initWorld() runs.
 initWorld();
 
-// Re-create the world on resize (edge shapes cannot be repositioned after creation).
 window.addEventListener('resize', () => {
-  springJoint = null;  // joint belongs to the old world — just forget it
+  const prevPos = diskBody?.getPosition();
+  const prevVel = diskBody?.getLinearVelocity();
+  springJoint = null;
   initWorld();
-  syncDiskToBody();
+  if(prevPos){
+    diskBody.setPosition(prevPos);
+    diskBody.setLinearVelocity(prevVel);
+    diskBody.setAwake(true);
+  }
 }, { passive: true });
 
-// ─── Helpers used by update() ─────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function barFloorY(x){
   if(bar.y2 === undefined) return bar.y;
@@ -199,37 +198,47 @@ function barFloorY(x){
 }
 
 function noteFromY(){
+  const pos = diskBody.getPosition();
+  const x = toPx(pos.x), y = toPx(pos.y);
   const R = disk.r, eps = 0.5;
-  if(disk.y <= R + eps)                     return 4;
-  if(disk.y >= barFloorY(disk.x) - R - eps) return 0;
-  const t = (disk.y - R - eps) / (bar.y - 2*R - 2*eps);
+  if(y <= R + eps)                  return 4;
+  if(y >= barFloorY(x) - R - eps)   return 0;
+  const t = (y - R - eps) / (bar.y - 2*R - 2*eps);
   if(t < 1/3) return 3;
   if(t < 2/3) return 2;
   return 1;
 }
 
-// Push the game's authoritative disk state into the Planck body.
-// Called at the start of each update() to pick up external changes
-// (pause restore, reverse, reset, fling-freeze).
-function syncDiskToBody(){
-  diskBody.setPosition(Vec2(toM(disk.x), toM(disk.y)));
-  diskBody.setLinearVelocity(Vec2(toM(disk.vx), toM(disk.vy)));
-  diskBody.setAwake(true);
+function destroySpringJoint(){
+  if(springJoint){ world.destroyJoint(springJoint); springJoint = null; }
 }
 
+// ─── Spring lifecycle (called from zen1-input.js) ─────────────────────────────
 
-function createSpringJoint(){
-  const ap = Vec2(toM(anchor.x), toM(anchor.y));
+export function grab(x, y){
+  clearPause();
+  disk.glass = false;
+  const ap = Vec2(toM(x), toM(y));
   anchorBody.setPosition(ap);
   springJoint = world.createJoint(DistanceJoint({
     frequencyHz:  SPRING_FREQ_HZ,
     dampingRatio: SPRING_DAMP_RATIO,
     length:       0,
   }, anchorBody, diskBody, ap, diskBody.getPosition()));
+  if(USE_TRAIL) pauseTrail();
 }
 
-function destroySpringJoint(){
-  if(springJoint){ world.destroyJoint(springJoint); springJoint = null; }
+export function release(){
+  const vel   = diskBody.getLinearVelocity();
+  const speed = Math.hypot(toPx(vel.x), toPx(vel.y));
+  const flung = speed > FLING_THRESHOLD;
+  if(!flung) diskBody.setLinearVelocity(Vec2(0, 0));
+  destroySpringJoint();
+  if(USE_TRAIL && flung) resetTrail();
+}
+
+export function moveAnchor(x, y){
+  if(springJoint) anchorBody.setPosition(Vec2(toM(x), toM(y)));
 }
 
 function updateBarBody(){
@@ -242,98 +251,62 @@ function updateBarBody(){
 
 function updateBumperBody(){
   if(!USE_BUMPER || !bumper.active) return;
-  // Teleport only — bumper is a static obstacle, not a launcher.
-  // Giving it a velocity caused the solver to inject huge energy when dragged fast.
   bumperBody.setPosition(Vec2(toM(bumper.x), toM(bumper.y)));
   bumperBody.setLinearVelocity(Vec2(0, 0));
 }
 
-function readBackDisk(){
-  const pos = diskBody.getPosition();
-  const vel = diskBody.getLinearVelocity();
-  disk.x  = toPx(pos.x);
-  disk.y  = toPx(pos.y);
-  disk.vx = toPx(vel.x);
-  disk.vy = toPx(vel.y);
-}
-
 // ─── State between frames ─────────────────────────────────────────────────────
-let wasAnchorActive  = false;
 let wasBarContact    = false;
 let wasBumperContact = false;
 let idleTime         = 0;
 
 // ─── Main update ─────────────────────────────────────────────────────────────
 export function update(dt){
-  // 1. Bar velocity at disk's x (for sound intensity; kept in pixel-space).
-  const floorNow  = barFloorY(disk.x);
+  // 1. Bar velocity bookkeeping (for sound intensity).
+  const diskPos   = diskBody.getPosition();
+  const diskX     = toPx(diskPos.x);
+  const floorNow  = barFloorY(diskX);
   const floorPrev = (bar.prevY1 ?? bar.y1) +
-                    ((bar.prevY2 ?? bar.y2) - (bar.prevY1 ?? bar.y1)) * (disk.x / canvas.width);
+                    ((bar.prevY2 ?? bar.y2) - (bar.prevY1 ?? bar.y1)) * (diskX / canvas.width);
   bar.vy = (floorNow - floorPrev) / dt;
   const barMoved = bar.y1 !== bar.prevY1 || bar.y2 !== bar.prevY2;
   bar.prevY1 = bar.y1;
   bar.prevY2 = bar.y2;
 
-  // 2. Grab / release detection.
-  const justGrabbed  = anchor.active && !wasAnchorActive;
-  const justReleased = !anchor.active && wasAnchorActive;
-  wasAnchorActive = anchor.active;
-  if(justGrabbed){ clearPause(); createSpringJoint(); }
-  if(justReleased) destroySpringJoint();
+  // 2. Per-frame restitution and damping.
+  const held = springJoint !== null;
+  diskBody.getFixtureList().setRestitution(held ? ANCHOR_BOUNCE : params.bounce);
+  diskBody.setLinearDamping(held ? HOLD_DAMPING : params.friction * params.frameMultiplier);
 
-  // 3. Fling / freeze on release.
-  let flung = false;
-  if(justReleased){
-    const speed = Math.hypot(disk.vx, disk.vy);
-    if(speed <= FLING_THRESHOLD){ disk.vx = 0; disk.vy = 0; }
-    else flung = true;
-  }
-
-  // 4. Push game state (including any external changes) into Planck body.
-  syncDiskToBody();
-
-  // 5. Per-frame restitution: softer while spring is active.
-  diskBody.getFixtureList().setRestitution(anchor.active ? ANCHOR_BOUNCE : params.bounce);
-
-  // 6. Friction via Planck's native linearDamping (equivalent to params.friction per second).
-  diskBody.setLinearDamping(params.friction * params.frameMultiplier);
-
-  // 7. Move kinematic bar.
+  // 3. Move kinematic bodies.
   updateBarBody();
-
-  // 8. Move kinematic bumper.
   updateBumperBody();
 
-  // 9. Move spring anchor to follow the finger.
-  if(anchor.active) anchorBody.setPosition(Vec2(toM(anchor.x), toM(anchor.y)));
-
-  // 10. Cache pre-step speed for sound intensity (handleContact reads this).
-  preStepSpeed     = Math.hypot(disk.vx, disk.vy);
+  // 4. Cache pre-step speed for sound intensity (handleContact reads this).
+  const vel = diskBody.getLinearVelocity();
+  preStepSpeed     = Math.hypot(toPx(vel.x), toPx(vel.y));
   nowBarContact    = false;
   nowBumperContact = false;
 
-  // 11. Physics step — Planck advances positions, resolves collisions.
-  //     8 velocity iterations + 3 position iterations is the Box2D recommendation.
+  // 5. Physics step.
   world.step(dt, 8, 3);
 
-  // 12. Read Planck results back into shared disk state.
-  readBackDisk();
-
-  // 13. Rising-edge sounds for bar and bumper.
+  // 6. Rising-edge sounds for bar and bumper.
   if(nowBarContact && !wasBarContact){
-    const approach  = Math.max(Math.abs(disk.vy), Math.abs(bar.vy));
+    const diskVy   = toPx(diskBody.getLinearVelocity().y);
+    const approach  = Math.max(Math.abs(diskVy), Math.abs(bar.vy));
     const intensity = Math.max(0.15, Math.min(approach / MAX_BOUNCE_SPEED, 1));
     if(USE_CHIMES) playChime(intensity, noteFromY());
     else           playKnock(intensity);
   }
   if(nowBumperContact && !wasBumperContact){
-    const intensity = Math.max(0.15, Math.min(Math.hypot(disk.vx, disk.vy) / MAX_BOUNCE_SPEED, 1));
+    const intensity = Math.max(0.15, Math.min(preStepSpeed / MAX_BOUNCE_SPEED, 1));
     playKnock(intensity);
   }
   wasBarContact    = nowBarContact;
   wasBumperContact = nowBumperContact;
 
-  // 16. Bumper events / targets / trail / idle — unchanged from original.
+  // 7. Bumper / targets / trail / idle.
   const bumperEvents = USE_BUMPER
     ? tickBumper()
     : { firstHit: false, placed: false, removed: false, removedAfterHit: false };
@@ -341,15 +314,17 @@ export function update(dt){
   if(USE_TARGETS) tickTargets(dt);
 
   if(USE_TRAIL){
-    if(justGrabbed) pauseTrail();
-    if(flung || barMoved || bumperEvents.firstHit || bumperEvents.removedAfterHit) resetTrail();
-    if(!anchor.active) tickTrail();
+    if(barMoved || bumperEvents.firstHit || bumperEvents.removedAfterHit) resetTrail();
+    if(!held) tickTrail();
   }
 
   if(USE_IDLE_RESET){
-    const userInteracting = anchor.active || bar.dragging || bumperEvents.placed || bumperEvents.removed;
+    const userInteracting = held || bar.dragging || bumperEvents.placed || bumperEvents.removed;
     if(userInteracting) idleTime = 0;
     else idleTime += dt;
-    if(idleTime >= IDLE_TIMEOUT){ disk.vx = 0; disk.vy = 0; idleTime = 0; }
+    if(idleTime >= IDLE_TIMEOUT){
+      diskBody.setLinearVelocity(Vec2(0, 0));
+      idleTime = 0;
+    }
   }
 }

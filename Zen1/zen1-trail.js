@@ -1,5 +1,5 @@
 import { renderExtras } from '../state.js';
-import { disk } from '../playfield.js';
+import { diskBody, toPx } from './zen1-physics.js';
 
 const TRAIL_COLOR = 'rgba(255, 255, 255, 0.28)';
 const TRAIL_WIDTH = 1.5;
@@ -40,7 +40,8 @@ export function tickTrail(){
     currentSegment = { color: nextSegmentColor, composite: nextSegmentComposite, width: nextSegmentWidth, points: [] };
     trail.push(currentSegment);
   }
-  currentSegment.points.push({ x: disk.x, y: disk.y });
+  const pos = diskBody.getPosition();
+  currentSegment.points.push({ x: toPx(pos.x), y: toPx(pos.y) });
 }
 
 export function pauseTrail(){
