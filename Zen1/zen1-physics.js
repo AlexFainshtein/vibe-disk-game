@@ -187,6 +187,9 @@ export function update(dt){
       const { nx, ny } = barNormal();
       disk.x += (disk.r - dist) * nx;
       disk.y += (disk.r - dist) * ny;
+      // Tilted bar normal has a horizontal component — clamp to canvas walls.
+      disk.x = Math.max(disk.r, Math.min(canvas.width - disk.r, disk.x));
+      disk.y = Math.max(disk.r, disk.y);
     }
   }
   if(USE_BUMPER && bumper.active){
@@ -201,6 +204,9 @@ export function update(dt){
       } else {
         disk.y = bumper.y - Rsum; // disk exactly at bumper centre — push straight up
       }
+      // Clamp to canvas walls so the push can't strand the disk outside.
+      disk.x = Math.max(disk.r, Math.min(canvas.width - disk.r, disk.x));
+      disk.y = Math.max(disk.r, disk.y);
     }
   }
 
