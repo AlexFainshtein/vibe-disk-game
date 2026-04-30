@@ -2,7 +2,7 @@ import { canvas, params, renderExtras } from '../state.js';
 import { disk, bar } from '../playfield.js';
 import { playKnock, playChime, playChimeFreq } from '../sound.js';
 import { tickTargets } from './zen1-targets.js';
-import { tickBumper, bumper, notifyBumperHit } from './zen1-bumper.js';
+import { tickBumper, bumpers, notifyBumperHit, setOnBumperGrabbed } from './zen1-bumper.js';
 import { tickTrail, pauseTrail, resetTrail, cycleTrailColor, notifyContact, addContactPoint } from './zen1-trail.js';
 import { initPause, clearPause } from './zen1-pause.js';
 import './zen1-bar.js';
@@ -95,14 +95,14 @@ export const toM  = px => px / PPM;
 export const toPx = m  => m  * PPM;
 
 export let diskBody, anchorBody;
-let world, barBody, bumperBody;
+let world, barBody, bumperBodies = [];
 let barFixture = null;
 let springJoint = null;
 let wallTop, wallLeft, wallRight, wallBottom;
 
-let nowBarContact    = false;
-let nowBumperContact = false;
-let preStepSpeed     = 0;
+let nowBarContact     = false;
+let nowBumperContact  = bumpers.map(() => false);
+let preStepSpeed      = 0;
 
 function makeEdgeWall(x1, y1, x2, y2){
   const b = world.createBody({ type: 'static' });
@@ -129,13 +129,10 @@ function initWorld(){
   barBody = world.createBody({ type: 'static', position: Vec2(0, 0) });
   barFixture = null;
 
-  bumperBody = world.createBody({
-    type:     'kinematic',
-    position: Vec2(toM(bumper.x), toM(bumper.y)),
-  });
-  bumperBody.createFixture(Circle(toM(bumper.r)), {
-    restitution: 0,
-    friction:    0,
+  bumperBodies = bumpers.map(b => {
+    const body = world.createBody({ type: 'kinematic', position: Vec2(toM(b.x), toM(b.y)) });
+    body.createFixture(Circle(toM(b.r)), { restitution: 0, friction: 0 });
+    return body;
   });
 
   diskBody = world.createBody({
@@ -170,12 +167,11 @@ function handleContact(contact){
   if(other === barBody){
     nowBarContact = true;
     surface = 'bar';
-  } else if(other === bumperBody){
-    if(USE_BUMPER){
-      notifyBumperHit();
-      nowBumperContact = true;
-      surface = 'bumper';
-    }
+  } else if(USE_BUMPER && (bumperBodies.indexOf(other) >= 0)){
+    const bi = bumperBodies.indexOf(other);
+    notifyBumperHit(bi);
+    nowBumperContact[bi] = true;
+    surface = 'bumper' + (bi + 1);
   } else {
     surface = other === wallTop ? 'wallTop' : other === wallLeft ? 'wallLeft' : other === wallRight ? 'wallRight' : 'wallBottom';
     if(intensity > 0){
@@ -218,32 +214,39 @@ function barFloorY(x){
 //   do=C  re=D  mi=E  fa=F  sol=G  la=A  si=B
 const NOTE_SEMITONES = { do: 0, re: 2, mi: 4, fa: 5, sol: 7, la: 9, si: 11 };
 const C4_HZ = 261.63;
+const TRANSPOSE = 0;  // semitones — positive = up, negative = down
 function getnote(name, octave = 0){
   const sharp = name.endsWith('#');
   const base  = sharp ? name.slice(0, -1) : name;
   const semi  = NOTE_SEMITONES[base] + (sharp ? 1 : 0) + octave * 12;
-  return { freq: C4_HZ * Math.pow(2, semi / 12) };
+  return { freq: C4_HZ * Math.pow(2, semi / 12), semi };
+}
+function transposedFreq(entry){
+  return C4_HZ * Math.pow(2, (entry.semi + TRANSPOSE) / 12);
 }
 
 // Sound table — one entry per surface.
 // Chime entries: { type: 'chime', ...getnote('name', octave) }
 // Knock entries: { type: 'knock' }
 const SURFACE_SOUND = {
-  bar:        { type: 'chime', ...getnote('do',  0)  },
   wallLeft:   { type: 'chime', ...getnote('mi',  0)  },
+  bar:        { type: 'chime', ...getnote('do',  0)  },
   wallTop:    { type: 'chime', ...getnote('sol', 0)  },
   wallRight:  { type: 'chime', ...getnote('do', +1)  },
-  bumper:     { type: 'chime', ...getnote('la',  0)  },
   wallBottom: { type: 'chime', ...getnote('do', -1)  },
-//  bumper:     { type: 'knock'                        },
+  bumper1:    { type: 'chime', ...getnote('re#',  0)  },  // red
+  bumper2:    { type: 'chime', ...getnote('sol', 0)  },  // blue
+  bumper3:    { type: 'chime', ...getnote('do', +1)  },  // green
 };
 
 function playSurface(surface, intensity){
   const s = SURFACE_SOUND[surface];
   if(!s) return;
   if(s.type === 'knock') playKnock(intensity);
-  else                   playChimeFreq(intensity, s.freq);
+  else                   playChimeFreq(intensity, transposedFreq(s));
 }
+
+setOnBumperGrabbed((i) => playSurface('bumper' + (i + 1), 0.4));
 
 function destroySpringJoint(){
   if(springJoint){ world.destroyJoint(springJoint); springJoint = null; }
@@ -296,15 +299,17 @@ function updateBarBody(){
   );
 }
 
-function updateBumperBody(){
-  if(!USE_BUMPER || !bumper.active) return;
-  bumperBody.setPosition(Vec2(toM(bumper.x), toM(bumper.y)));
-  bumperBody.setLinearVelocity(Vec2(0, 0));
+function updateBumperBodies(){
+  if(!USE_BUMPER) return;
+  bumpers.forEach((b, i) => {
+    bumperBodies[i].setPosition(Vec2(toM(b.x), toM(b.y)));
+    bumperBodies[i].setLinearVelocity(Vec2(0, 0));
+  });
 }
 
 // ─── State between frames ─────────────────────────────────────────────────────
 let wasBarContact    = false;
-let wasBumperContact = false;
+let wasBumperContact = bumpers.map(() => false);
 let idleTime         = 0;
 
 // ─── Main update ─────────────────────────────────────────────────────────────
@@ -325,15 +330,15 @@ export function update(dt){
   diskBody.getFixtureList().setRestitution(held ? ANCHOR_BOUNCE : params.bounce);
   diskBody.setLinearDamping(held ? HOLD_DAMPING : params.friction * params.frameMultiplier);
 
-  // 3. Rebuild bar fixture if the bar moved; always sync bumper.
+  // 3. Rebuild bar fixture if the bar moved; always sync bumpers.
   if(barMoved) updateBarBody();
-  updateBumperBody();
+  updateBumperBodies();
 
   // 4. Cache pre-step speed for sound intensity (handleContact reads this).
   const vel = diskBody.getLinearVelocity();
-  preStepSpeed     = Math.hypot(toPx(vel.x), toPx(vel.y));
-  nowBarContact    = false;
-  nowBumperContact = false;
+  preStepSpeed = Math.hypot(toPx(vel.x), toPx(vel.y));
+  nowBarContact = false;
+  nowBumperContact.fill(false);
 
   // 5. Physics step.
   world.step(dt, 8, 3);
@@ -346,13 +351,15 @@ export function update(dt){
     if(USE_CHIMES) playSurface('bar', intensity);
     else           playKnock(intensity);
   }
-  if(nowBumperContact && !wasBumperContact){
-    const intensity = Math.max(0.15, Math.min(preStepSpeed / MAX_BOUNCE_SPEED, 1));
-    if(USE_CHIMES) playSurface('bumper', intensity);
-    else           playKnock(intensity);
-  }
-  wasBarContact    = nowBarContact;
-  wasBumperContact = nowBumperContact;
+  bumpers.forEach((b, i) => {
+    if(nowBumperContact[i] && !wasBumperContact[i]){
+      const intensity = Math.max(0.15, Math.min(preStepSpeed / MAX_BOUNCE_SPEED, 1));
+      if(USE_CHIMES) playSurface('bumper' + (i + 1), intensity);
+      else           playKnock(intensity);
+    }
+    wasBumperContact[i] = nowBumperContact[i];
+  });
+  wasBarContact = nowBarContact;
 
   // 7. Bumper / targets / trail / idle.
   const bumperEvents = USE_BUMPER
