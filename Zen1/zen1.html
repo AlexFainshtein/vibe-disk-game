@@ -5,18 +5,20 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Vibe Disk Game — Zen1</title>
   <link rel="stylesheet" href="../style.css">
+  <style>
+    #resetDisk{position:fixed;top:28px;left:12px;background:#14323a;color:#e6eef6;padding:12px 16px;border-radius:8px;border:none;font:inherit;font-size:15px;cursor:pointer;pointer-events:auto;z-index:10}
+    #resetDisk:hover{background:#1b4a4f}
+    body[data-player="zen1"] #panel{flex-direction:column;align-items:stretch}
+  </style>
 </head>
 <body data-player="zen1">
   <canvas id="game"></canvas>
   <div id="ui">Wiggle the disk.</div>
+  <button id="resetDisk">Reset</button>
   <div id="panel">
-    <button id="resetDisk">Reset</button>
-    <button id="pauseBtn">⏸ Pause</button>
     <button id="colorBtn">◐ Color</button>
-  </div>
-  <div id="speed-panel">
-    <button id="speedDown">−</button>
-    <button id="speedUp">+</button>
+    <button id="speedUp">+ Faster</button>
+    <button id="speedDown">− Slower</button>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/planck@1.0.0/dist/planck.min.js"></script>
   <script type="module" src="main-zen1.js"></script>

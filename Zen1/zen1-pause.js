@@ -1,14 +1,10 @@
-let paused   = false;
-let savedVx  = 0;
-let savedVy  = 0;
+import { inputHooks } from '../state.js';
+
+let paused    = false;
+let savedVx   = 0;
+let savedVy   = 0;
 let _diskBody = null;
 let _Vec2     = null;
-
-const buttonRef = document.getElementById('pauseBtn');
-
-function setLabel(){
-  if(buttonRef) buttonRef.textContent = paused ? '▶ Resume' : '⏸ Pause';
-}
 
 function togglePause(){
   if(!_diskBody) return;
@@ -23,21 +19,22 @@ function togglePause(){
     _diskBody.setAwake(true);
     paused = false;
   }
-  setLabel();
-}
-
-if(buttonRef){
-  buttonRef.addEventListener('pointerdown', (e) => e.stopPropagation());
-  buttonRef.addEventListener('click', togglePause);
 }
 
 export function initPause(diskBody, Vec2){
   _diskBody = diskBody;
   _Vec2     = Vec2;
+
+  const prevDown = inputHooks.emptyDown;
+  inputHooks.emptyDown = (x, y) => {
+    if(prevDown && prevDown(x, y) === true) return true;
+    togglePause();
+    return true;
+  };
 }
 
 export function clearPause(){
   if(!paused) return;
   paused = false;
-  setLabel();
+  savedVx = savedVy = 0;
 }
