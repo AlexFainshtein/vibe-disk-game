@@ -33,6 +33,23 @@ bar.prevY2 = bar.y2;
 
 const HANDLE_W   = 48;  // px width of each edge handle hit zone
 const HANDLE_VIS = 10;  // px width of the visible indicator strip
+// Snap to the nearest angle of the form 360/N (N integer >= 4), plus 0 (horizontal).
+// N_exact = 2PI/|theta|; the nearest valid snap is at floor or ceil of N_exact.
+// No precomputed list, no artificial limit — covers all N up to infinity (horizontal).
+function snapAngle(theta){
+  const sign = theta >= 0 ? 1 : -1;
+  const abs  = Math.abs(theta);
+  if(abs < 1e-9) return 0;
+  const nExact = 2 * Math.PI / abs;
+  const nLo    = Math.max(4, Math.floor(nExact));
+  const nHi    = Math.max(4, Math.ceil(nExact));
+  const angLo  = 2 * Math.PI / nLo;
+  const angHi  = 2 * Math.PI / nHi;
+  // Also consider 0 (N = infinity, horizontal bar)
+  const nearest = [0, angLo, angHi].reduce((a, b) =>
+    Math.abs(abs - a) <= Math.abs(abs - b) ? a : b);
+  return sign * nearest;
+}
 
 bar.overlay = (c) => {
   const y1 = bar.y1, y2 = bar.y2, h = bar.height, W = canvas.width;
@@ -107,18 +124,19 @@ inputHooks.emptyMove = (x, y) => {
   if(!dragMode){ if(prevEmptyMove) prevEmptyMove(x, y); return; }
   const dy = y - dragStartY;
   if(dragMode === 'left'){
-    bar.y1 = clampEdge(dragStartY1 + dy);
+    const raw         = Math.min(clampEdge(dragStartY1 + dy), bar.y2);
+    const theta       = Math.atan2(bar.y2 - raw, canvas.width);
+    const snappedY1   = bar.y2 - canvas.width * Math.tan(snapAngle(theta));
+    bar.y1 = Math.min(clampEdge(snappedY1), bar.y2);
   } else if(dragMode === 'right'){
-    bar.y2 = clampEdge(dragStartY2 + dy);
+    const raw         = Math.min(clampEdge(dragStartY2 + dy), bar.y1);
+    const theta       = Math.atan2(raw - bar.y1, canvas.width);
+    const snappedY2   = bar.y1 + canvas.width * Math.tan(snapAngle(theta));
+    bar.y2 = Math.min(clampEdge(snappedY2), bar.y1);
   } else {
-    // Middle: move both edges together, preserving tilt.
-    let ny1 = dragStartY1 + dy, ny2 = dragStartY2 + dy;
-    const lo = MIN_BAR_Y(), hi = MAX_BAR_Y();
-    const overTop = lo - Math.min(ny1, ny2);
-    const overBot = Math.max(ny1, ny2) - hi;
-    if(overTop > 0){ ny1 += overTop; ny2 += overTop; }
-    if(overBot > 0){ ny1 -= overBot; ny2 -= overBot; }
-    bar.y1 = ny1; bar.y2 = ny2;
+    // Middle: move both edges together, preserving tilt. No clamping.
+    bar.y1 = dragStartY1 + dy;
+    bar.y2 = dragStartY2 + dy;
   }
   bar.y = Math.min(bar.y1, bar.y2); // keep bounding box in sync for input.js
 };
