@@ -35,11 +35,10 @@ export function playKnock(intensity){
 
 const PENTATONIC_FREQS = [220.00, 261.63, 293.66, 329.63, 392.00]; // A minor pentatonic: A3, C4, D4, E4, G4
 
-export function playChime(intensity, noteIndex, octaveShift = 0){
+export function playChimeFreq(intensity, freq){
   const ac = getCtx();
   if(ac.state === 'suspended') ac.resume();
 
-  const freq = PENTATONIC_FREQS[noteIndex] * Math.pow(2, octaveShift);
   const vol = 0.15 + 0.45 * intensity;
   const duration = 0.4;
 
@@ -54,6 +53,10 @@ export function playChime(intensity, noteIndex, octaveShift = 0){
   gain.connect(ac.destination);
   osc.start(ac.currentTime);
   osc.stop(ac.currentTime + duration + 0.01);
+}
+
+export function playChime(intensity, noteIndex, octaveShift = 0){
+  playChimeFreq(intensity, PENTATONIC_FREQS[noteIndex] * Math.pow(2, octaveShift));
 }
 
 export function playGrab(){

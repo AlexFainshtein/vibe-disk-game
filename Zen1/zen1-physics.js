@@ -1,6 +1,6 @@
 import { canvas, params, renderExtras } from '../state.js';
 import { disk, bar } from '../playfield.js';
-import { playKnock, playChime } from '../sound.js';
+import { playKnock, playChime, playChimeFreq } from '../sound.js';
 import { tickTargets } from './zen1-targets.js';
 import { tickBumper, bumper, notifyBumperHit } from './zen1-bumper.js';
 import { tickTrail, pauseTrail, resetTrail, cycleTrailColor, notifyContact, addContactPoint } from './zen1-trail.js';
@@ -179,7 +179,7 @@ function handleContact(contact){
   } else {
     surface = other === wallTop ? 'wallTop' : other === wallLeft ? 'wallLeft' : other === wallRight ? 'wallRight' : 'wallBottom';
     if(intensity > 0){
-      if(USE_CHIMES) playChime(Math.max(0.15, intensity), noteFromY());
+      if(USE_CHIMES) playSurface(surface, Math.max(0.15, intensity));
       else           playKnock(intensity);
     }
   }
@@ -212,16 +212,36 @@ function barFloorY(x){
   return bar.y1 + (bar.y2 - bar.y1) * (x / canvas.width);
 }
 
-function noteFromY(){
-  const pos = diskBody.getPosition();
-  const x = toPx(pos.x), y = toPx(pos.y);
-  const R = disk.r, eps = 0.5;
-  if(y <= R + eps)                  return 4;
-  if(y >= barFloorY(x) - R - eps)   return 0;
-  const t = (y - R - eps) / (bar.y - 2*R - 2*eps);
-  if(t < 1/3) return 3;
-  if(t < 2/3) return 2;
-  return 1;
+// getnote(name, octave=0) — converts solfège name to a frequency (Hz).
+// Reference: A3 = 220 Hz. Octave shifts by that many octaves.
+// Append '#' for a sharp, e.g. getnote('sol#').
+//   la=A  si=B  do=C  re=D  mi=E  fa=F  sol=G   (semitones above A3)
+const NOTE_SEMITONES = { la: 0, si: 2, do: 3, re: 5, mi: 7, fa: 8, sol: 10 };
+function getnote(name, octave = 0){
+  const sharp = name.endsWith('#');
+  const base  = sharp ? name.slice(0, -1) : name;
+  const semi  = NOTE_SEMITONES[base] + (sharp ? 1 : 0) + octave * 12;
+  return { freq: 220 * Math.pow(2, semi / 12) };
+}
+
+// Sound table — one entry per surface.
+// Chime entries: { type: 'chime', ...getnote('name', octave) }
+// Knock entries: { type: 'knock' }
+const SURFACE_SOUND = {
+  bar:        { type: 'chime', ...getnote('do')      },
+  wallLeft:   { type: 'chime', ...getnote('mi')      },
+  wallTop:    { type: 'chime', ...getnote('sol')     },
+  wallRight:  { type: 'chime', ...getnote('do', +1)  },
+  wallBottom: { type: 'chime', ...getnote('do', -1)  },
+  bumper:     { type: 'chime', ...getnote('la', +1)  },
+//  bumper:     { type: 'knock'                        },
+};
+
+function playSurface(surface, intensity){
+  const s = SURFACE_SOUND[surface];
+  if(!s) return;
+  if(s.type === 'knock') playKnock(intensity);
+  else                   playChimeFreq(intensity, s.freq);
 }
 
 function destroySpringJoint(){
@@ -322,12 +342,13 @@ export function update(dt){
     const diskVy   = toPx(diskBody.getLinearVelocity().y);
     const approach  = Math.max(Math.abs(diskVy), Math.abs(bar.vy));
     const intensity = Math.max(0.15, Math.min(approach / MAX_BOUNCE_SPEED, 1));
-    if(USE_CHIMES) playChime(intensity, noteFromY());
+    if(USE_CHIMES) playSurface('bar', intensity);
     else           playKnock(intensity);
   }
   if(nowBumperContact && !wasBumperContact){
     const intensity = Math.max(0.15, Math.min(preStepSpeed / MAX_BOUNCE_SPEED, 1));
-    playKnock(intensity);
+    if(USE_CHIMES) playSurface('bumper', intensity);
+    else           playKnock(intensity);
   }
   wasBarContact    = nowBarContact;
   wasBumperContact = nowBumperContact;
