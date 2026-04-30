@@ -9,7 +9,11 @@ import { playGrab, playRelease } from '../sound.js';
 
 bar.hidden = true;
 
-function initialBarY(){ return canvas.height * 0.90; }
+const BUMPER_R_FRACTION = 1/6;  // must match BUMPER_RADIUS_FRACTION in zen1-bumper.js
+function initialBarY(){
+  const r = Math.min(canvas.width, canvas.height) * BUMPER_R_FRACTION;
+  return canvas.height - 2 * r;
+}
 
 bar.y1 = initialBarY();
 bar.y2 = initialBarY();

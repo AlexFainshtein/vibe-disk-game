@@ -232,14 +232,31 @@ function transposedFreq(entry){
 // Chime entries: { type: 'chime', ...getnote('name', octave) }
 // Knock entries: { type: 'knock' }
 const SURFACE_SOUND = {
-  wallLeft:   { type: 'chime', ...getnote('mi',  0)  },
-  bar:        { type: 'chime', ...getnote('do',  0)  },
-  wallTop:    { type: 'chime', ...getnote('sol', 0)  },
-  wallRight:  { type: 'chime', ...getnote('do', +1)  },
-  wallBottom: { type: 'chime', ...getnote('do', -1)  },
-  bumper1:    { type: 'chime', ...getnote('re#', 0)  },  // red
-  bumper2:    { type: 'chime', ...getnote('la' , 0)  },  // blue
-  bumper3:    { type: 'chime', ...getnote('si',  0)  },  // green
+  /*
+    wallLeft:   { type: 'chime', ...getnote('mi',  0)  },
+    bar:        { type: 'chime', ...getnote('do',  0)  },
+    wallTop:    { type: 'chime', ...getnote('sol', 0)  },
+    wallRight:  { type: 'chime', ...getnote('do', +1)  },
+    wallBottom: { type: 'chime', ...getnote('do', -1)  },
+    bumper1:    { type: 'chime', ...getnote('re', 0)  },  // red
+    bumper2:    { type: 'chime', ...getnote('fa' , 0)  },  // blue
+    bumper3:    { type: 'chime', ...getnote('la',  0)  },  // green
+*/
+//    bar:        { type: 'knock'  },
+    bar:        { type: 'chime', ...getnote('re',  -1)  },
+
+    wallLeft:   { type: 'chime', ...getnote('re',  0)  },
+    wallTop:    { type: 'chime', ...getnote('fa', 0)  },
+    wallRight:  { type: 'chime', ...getnote('si',  0)  },
+    bumper1:    { type: 'chime', ...getnote('la', -1)  },  // red
+    bumper2:    { type: 'chime', ...getnote('sol' , 0)  },  // blue
+    bumper3:    { type: 'chime', ...getnote('la',  0)  },  // green
+
+    wallBottom: { type: 'chime', ...getnote('do', -1)  },
+
+//  bumper1:    { type: 'chime', ...getnote('re#', 0)  },  // red
+  //bumper2:    { type: 'chime', ...getnote('la' , 0)  },  // blue
+  //bumper3:    { type: 'chime', ...getnote('si',  0)  },  // green
 };
 
 function playSurface(surface, intensity){

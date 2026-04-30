@@ -1,4 +1,5 @@
 import { canvas, renderExtras, inputHooks } from '../state.js';
+import { bar } from '../playfield.js';
 
 const BUMPER_RADIUS_FRACTION = 1/6;
 
@@ -6,15 +7,13 @@ function computeRadius(){
   return Math.min(canvas.width, canvas.height) * BUMPER_RADIUS_FRACTION;
 }
 
-const BAR_Y_FRACTION = 0.90;  // must match initialBarY() in zen1-bar.js
-
 function defaultPositions(){
   const r = computeRadius();
-  const y = canvas.height * BAR_Y_FRACTION - r;
+  const y = canvas.height + bar.height / 2 - r;  // bar overlaps top half-bar-height; bottom extends half-bar-height below screen
   return [
-    { x: canvas.width * 0.25, y },
-    { x: canvas.width * 0.5,  y },
-    { x: canvas.width * 0.75, y },
+    { x: r,                    y },
+    { x: canvas.width / 2,    y },
+    { x: canvas.width - r,    y },
   ];
 }
 
