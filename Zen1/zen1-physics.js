@@ -98,7 +98,7 @@ export let diskBody, anchorBody;
 let world, barBody, bumperBody;
 let barFixture = null;
 let springJoint = null;
-let wallTop, wallLeft, wallRight;
+let wallTop, wallLeft, wallRight, wallBottom;
 
 let nowBarContact    = false;
 let nowBumperContact = false;
@@ -119,9 +119,10 @@ function initWorld(){
 
   world = World({ gravity: Vec2(0, 0) });
 
-  wallTop   = makeEdgeWall(0, 0, W, 0);
-  wallLeft  = makeEdgeWall(0, 0, 0, H);
-  wallRight = makeEdgeWall(W, 0, W, H);
+  wallTop    = makeEdgeWall(0, 0, W, 0);
+  wallLeft   = makeEdgeWall(0, 0, 0, H);
+  wallRight  = makeEdgeWall(W, 0, W, H);
+  wallBottom = makeEdgeWall(0, H, W, H);
 
   // Bar: static body at origin — fixture is a polygon matching the visual trapezoid
   // exactly. Rebuilt via updateBarBody() whenever y1/y2 change.
@@ -176,7 +177,7 @@ function handleContact(contact){
       surface = 'bumper';
     }
   } else {
-    surface = other === wallTop ? 'wallTop' : other === wallLeft ? 'wallLeft' : 'wallRight';
+    surface = other === wallTop ? 'wallTop' : other === wallLeft ? 'wallLeft' : other === wallRight ? 'wallRight' : 'wallBottom';
     if(intensity > 0){
       if(USE_CHIMES) playChime(Math.max(0.15, intensity), noteFromY());
       else           playKnock(intensity);
