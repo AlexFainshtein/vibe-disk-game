@@ -213,27 +213,28 @@ function barFloorY(x){
 }
 
 // getnote(name, octave=0) — converts solfège name to a frequency (Hz).
-// Reference: A3 = 220 Hz. Octave shifts by that many octaves.
+// Octave 0 = C4..B4 (261.63..493.88 Hz). Octave boundary is at "do" (C).
 // Append '#' for a sharp, e.g. getnote('sol#').
-//   la=A  si=B  do=C  re=D  mi=E  fa=F  sol=G   (semitones above A3)
-const NOTE_SEMITONES = { la: 0, si: 2, do: 3, re: 5, mi: 7, fa: 8, sol: 10 };
+//   do=C  re=D  mi=E  fa=F  sol=G  la=A  si=B
+const NOTE_SEMITONES = { do: 0, re: 2, mi: 4, fa: 5, sol: 7, la: 9, si: 11 };
+const C4_HZ = 261.63;
 function getnote(name, octave = 0){
   const sharp = name.endsWith('#');
   const base  = sharp ? name.slice(0, -1) : name;
   const semi  = NOTE_SEMITONES[base] + (sharp ? 1 : 0) + octave * 12;
-  return { freq: 220 * Math.pow(2, semi / 12) };
+  return { freq: C4_HZ * Math.pow(2, semi / 12) };
 }
 
 // Sound table — one entry per surface.
 // Chime entries: { type: 'chime', ...getnote('name', octave) }
 // Knock entries: { type: 'knock' }
 const SURFACE_SOUND = {
-  bar:        { type: 'chime', ...getnote('do')      },
-  wallLeft:   { type: 'chime', ...getnote('mi')      },
-  wallTop:    { type: 'chime', ...getnote('sol')     },
+  bar:        { type: 'chime', ...getnote('do',  0)  },
+  wallLeft:   { type: 'chime', ...getnote('mi',  0)  },
+  wallTop:    { type: 'chime', ...getnote('sol', 0)  },
   wallRight:  { type: 'chime', ...getnote('do', +1)  },
+  bumper:     { type: 'chime', ...getnote('la',  0)  },
   wallBottom: { type: 'chime', ...getnote('do', -1)  },
-  bumper:     { type: 'chime', ...getnote('la', +1)  },
 //  bumper:     { type: 'knock'                        },
 };
 
