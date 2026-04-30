@@ -95,6 +95,24 @@ export function tickTrail(){
   if(positions.length > MAX_POINTS) positions.shift();
 }
 
+export function addContactPoint(x, y){
+  if(!initialized) init();
+  ensureOffscreen();
+  const cur = { x, y };
+  if(positions.length > 0){
+    const prev = positions[positions.length - 1];
+    offCtx.strokeStyle = currentDrawColor;
+    offCtx.lineWidth   = TRAIL_WIDTH;
+    offCtx.lineCap     = 'butt';
+    offCtx.beginPath();
+    offCtx.moveTo(prev.x, prev.y);
+    offCtx.lineTo(cur.x, cur.y);
+    offCtx.stroke();
+  }
+  positions.push(cur);
+  if(positions.length > MAX_POINTS) positions.shift();
+}
+
 export function pauseTrail(){
   positions.length = 0;
 }
