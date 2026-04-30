@@ -237,9 +237,9 @@ const SURFACE_SOUND = {
   wallTop:    { type: 'chime', ...getnote('sol', 0)  },
   wallRight:  { type: 'chime', ...getnote('do', +1)  },
   wallBottom: { type: 'chime', ...getnote('do', -1)  },
-  bumper1:    { type: 'chime', ...getnote('re#',  0)  },  // red
-  bumper2:    { type: 'chime', ...getnote('sol', 0)  },  // blue
-  bumper3:    { type: 'chime', ...getnote('do', +1)  },  // green
+  bumper1:    { type: 'chime', ...getnote('re#', 0)  },  // red
+  bumper2:    { type: 'chime', ...getnote('la' , 0)  },  // blue
+  bumper3:    { type: 'chime', ...getnote('si',  0)  },  // green
 };
 
 function playSurface(surface, intensity){
