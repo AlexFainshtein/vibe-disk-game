@@ -542,13 +542,20 @@ export function update(dt){
 
   if(USE_TRAIL){
     if(ctrl.grabbed) pauseTrail();
-    // Trail resets on fling release and on bar movement. Bumper events used to
-    // reset it too (the design rationale was "placing/removing a bumper marks
-    // a new chapter"), but with auto-drift continuously producing a trail and
-    // the user wanting to keep complex trajectories that happen to encounter
-    // a bumper, that rule does more harm than good. The Erase/Draw button now
-    // gives the user explicit control over trail lifecycle.
-    if(ctrl.flung || barMoved) resetTrail();
+    // Trail-reset policy: reset on the moments that mark a new "chapter" of
+    // motion in the current playfield.
+    //   - Fling release / bar movement: clear delineation of an old run.
+    //   - bumperEvents.firstHit: a bumper just *affected the trajectory* for
+    //     the first time. Mere placement-without-impact doesn't count; what
+    //     matters is the bumper has now changed how the disk moves.
+    //   - bumperEvents.removedAfterHit: a bumper that had been affecting
+    //     trajectories just disappeared. Old paths bouncing off it become
+    //     geometric ghosts — clear.
+    //   - Plain `placed` / `removed` (without firstHit or hit before removal)
+    //     intentionally do NOT trigger; if the bumper never interacted with
+    //     the disk, the old trail is still valid in the current geometry.
+    // The Erase/Draw button gives explicit user control on top of all this.
+    if(ctrl.flung || barMoved || bumperEvents.firstHit || bumperEvents.removedAfterHit) resetTrail();
     if(!anchor.active) tickTrail();
   }
 
