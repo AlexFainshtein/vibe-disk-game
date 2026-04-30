@@ -42,6 +42,8 @@ function drawBumper(c){
 renderExtras.push(drawBumper);
 
 let dragging = false;
+let grabOffsetX = 0;
+let grabOffsetY = 0;
 let initialized = false;
 
 function init(){
@@ -53,6 +55,8 @@ function init(){
     const dx = x - bumper.x, dy = y - bumper.y;
     if(dx*dx + dy*dy <= bumper.r * bumper.r){
       dragging = true;
+      grabOffsetX = bumper.x - x;
+      grabOffsetY = bumper.y - y;
       return true;
     }
     if(prevDown) return prevDown(x, y);
@@ -61,7 +65,7 @@ function init(){
 
   const prevMove = inputHooks.emptyMove;
   inputHooks.emptyMove = (x, y) => {
-    if(dragging){ bumper.x = x; bumper.y = y; }
+    if(dragging){ bumper.x = x + grabOffsetX; bumper.y = y + grabOffsetY; }
     else if(prevMove) prevMove(x, y);
   };
 
