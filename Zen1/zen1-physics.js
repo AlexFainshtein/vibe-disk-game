@@ -73,12 +73,13 @@ if(uiHint){
 }
 
 // ─── Physics constants ────────────────────────────────────────────────────────
-const MAX_BOUNCE_SPEED  = 1200;
-const SPRING_FREQ_HZ    = 4;
-const SPRING_DAMP_RATIO = 0.7;
-const FLING_THRESHOLD   = 50; //200;
-const ANCHOR_BOUNCE     = 0.5;
-const HOLD_DAMPING      = 5;
+const MAX_BOUNCE_SPEED   = 1200;
+const SPRING_FREQ_HZ     = 4;
+const SPRING_DAMP_RATIO  = 0.7;
+const FLING_THRESHOLD    = 0; //200;
+const ANCHOR_BOUNCE      = 0.5;
+const HOLD_DAMPING       = 5;
+const WALL_SEPARATION_PX = 1;  // px gap injected when ball rests against a wall with zero normal velocity
 
 const USE_CHIMES     = true;
 const USE_TARGETS    = false;
@@ -345,6 +346,27 @@ export function update(dt){
 
   // 5. Physics step.
   world.step(dt, 8, 3);
+
+  // 5b. Break resting wall contacts by repositioning 1 px away from the wall
+  // when the ball is touching it with zero normal velocity. This prevents Box2D
+  // from treating it as a resting constraint that absorbs simultaneous contacts.
+  {
+    const p   = diskBody.getPosition();
+    const r   = toM(disk.r);
+    const W   = toM(canvas.width), H = toM(canvas.height);
+    const v   = diskBody.getLinearVelocity();
+    const gap   = toM(WALL_SEPARATION_PX);
+    const touch = toM(4);   // within 4 px of wall counts as touching
+    const vEps  = toM(0.1); // below 0.1 px/s normal velocity counts as resting
+    let x = p.x, y = p.y;
+    if(!diskHeld){
+      if(p.x - r < touch       && Math.abs(v.x) < vEps) x = r + gap;
+      if(p.x + r > W - touch   && Math.abs(v.x) < vEps) x = W - r - gap;
+      if(p.y - r < touch       && Math.abs(v.y) < vEps) y = r + gap;
+      if(p.y + r > H - touch   && Math.abs(v.y) < vEps) y = H - r - gap;
+    }
+    if(x !== p.x || y !== p.y) diskBody.setPosition(Vec2(x, y));
+  }
 
   // 6. Rising-edge sounds for bar and bumper.
   if(nowBarContact && !wasBarContact){
