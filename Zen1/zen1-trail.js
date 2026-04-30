@@ -3,7 +3,6 @@ import { diskBody, toPx } from './zen1-physics.js';
 
 const MAX_POINTS = 16;
 const TRAIL_WIDTH = 2;
-
 const TRAIL_ALPHA = 0.4;
 
 const PASTEL_COLORS = [
@@ -18,7 +17,32 @@ const PASTEL_COLORS = [
   'rgb(255, 209, 220)',   // rose
 ];
 
-let colorIndex = 0;
+// 0 = grey, 1 = grouped (all walls share one color), 2 = individual (each surface distinct)
+let mode = 0;
+let currentDrawColor = PASTEL_COLORS[0];
+const surfaceColors = { wallTop: PASTEL_COLORS[0], wallLeft: PASTEL_COLORS[0], wallRight: PASTEL_COLORS[0], bar: PASTEL_COLORS[0], bumper: PASTEL_COLORS[0] };
+
+function randomizeSurfaceColors(){
+  const indices = [1, 2, 3, 4, 5, 6, 7, 8];
+  for(let i = indices.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [indices[i], indices[j]] = [indices[j], indices[i]];
+  }
+  if(mode === 1){
+    const wallColor = PASTEL_COLORS[indices[0]];
+    surfaceColors.wallTop   = wallColor;
+    surfaceColors.wallLeft  = wallColor;
+    surfaceColors.wallRight = wallColor;
+    surfaceColors.bar       = PASTEL_COLORS[indices[1]];
+    surfaceColors.bumper    = PASTEL_COLORS[indices[2]];
+  } else {
+    surfaceColors.wallTop   = PASTEL_COLORS[indices[0]];
+    surfaceColors.wallLeft  = PASTEL_COLORS[indices[1]];
+    surfaceColors.wallRight = PASTEL_COLORS[indices[2]];
+    surfaceColors.bar       = PASTEL_COLORS[indices[3]];
+    surfaceColors.bumper    = PASTEL_COLORS[indices[4]];
+  }
+}
 
 const positions = [];
 
@@ -33,7 +57,7 @@ function ensureOffscreen(){
   offscreen.width  = canvas.width;
   offscreen.height = canvas.height;
   offCtx           = offscreen.getContext('2d');
-  positions.length = 0; // break path so resize doesn't connect mismatched coords
+  positions.length = 0;
 }
 
 function drawTrail(c){
@@ -58,9 +82,9 @@ export function tickTrail(){
 
   if(positions.length > 0){
     const prev = positions[positions.length - 1];
-    offCtx.strokeStyle = PASTEL_COLORS[colorIndex];
+    offCtx.strokeStyle = currentDrawColor;
     offCtx.lineWidth   = TRAIL_WIDTH;
-    offCtx.lineCap  = 'butt';
+    offCtx.lineCap     = 'butt';
     offCtx.beginPath();
     offCtx.moveTo(prev.x, prev.y);
     offCtx.lineTo(cur.x, cur.y);
@@ -72,7 +96,7 @@ export function tickTrail(){
 }
 
 export function pauseTrail(){
-  positions.length = 0; // forget last position so no jump-line after grab
+  positions.length = 0;
 }
 
 export function resetTrail(){
@@ -82,5 +106,13 @@ export function resetTrail(){
 }
 
 export function cycleTrailColor(){
-  colorIndex = (colorIndex + 1) % PASTEL_COLORS.length;
+  mode = (mode + 1) % 3;
+  currentDrawColor = PASTEL_COLORS[0]; // grey until first contact in dynamic modes
+  if(mode > 0) randomizeSurfaceColors();
+  resetTrail();
+}
+
+export function notifyContact(surface){
+  if(mode === 0) return;
+  currentDrawColor = surfaceColors[surface];
 }

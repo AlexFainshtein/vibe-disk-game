@@ -3,7 +3,7 @@ import { disk, bar } from '../playfield.js';
 import { playKnock, playChime } from '../sound.js';
 import { tickTargets } from './zen1-targets.js';
 import { tickBumper, bumper, notifyBumperHit } from './zen1-bumper.js';
-import { tickTrail, pauseTrail, resetTrail, cycleTrailColor } from './zen1-trail.js';
+import { tickTrail, pauseTrail, resetTrail, cycleTrailColor, notifyContact } from './zen1-trail.js';
 import { initPause, clearPause } from './zen1-pause.js';
 import './zen1-bar.js';
 
@@ -173,6 +173,8 @@ function handleContact(contact){
       nowBumperContact = true;
     }
   } else {
+    const surface = other === wallTop ? 'wallTop' : other === wallLeft ? 'wallLeft' : 'wallRight';
+    notifyContact(surface);
     if(intensity > 0){
       if(USE_CHIMES) playChime(Math.max(0.15, intensity), noteFromY());
       else           playKnock(intensity);
@@ -309,6 +311,7 @@ export function update(dt){
 
   // 6. Rising-edge sounds for bar and bumper.
   if(nowBarContact && !wasBarContact){
+    notifyContact('bar');
     const diskVy   = toPx(diskBody.getLinearVelocity().y);
     const approach  = Math.max(Math.abs(diskVy), Math.abs(bar.vy));
     const intensity = Math.max(0.15, Math.min(approach / MAX_BOUNCE_SPEED, 1));
@@ -316,6 +319,7 @@ export function update(dt){
     else           playKnock(intensity);
   }
   if(nowBumperContact && !wasBumperContact){
+    notifyContact('bumper');
     const intensity = Math.max(0.15, Math.min(preStepSpeed / MAX_BOUNCE_SPEED, 1));
     playKnock(intensity);
   }
