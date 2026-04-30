@@ -76,7 +76,7 @@ if(uiHint){
 const MAX_BOUNCE_SPEED  = 1200;
 const SPRING_FREQ_HZ    = 4;
 const SPRING_DAMP_RATIO = 0.7;
-const FLING_THRESHOLD   = 200;
+const FLING_THRESHOLD   = 50; //200;
 const ANCHOR_BOUNCE     = 0.5;
 const HOLD_DAMPING      = 5;
 
@@ -88,7 +88,8 @@ const USE_IDLE_RESET = false;
 const IDLE_TIMEOUT   = 60;
 
 // ─── Planck.js setup ─────────────────────────────────────────────────────────
-const { World, Vec2, Box, Circle, Edge, Polygon, DistanceJoint } = planck;
+const { World, Vec2, Box, Circle, Edge, Polygon, DistanceJoint, Settings } = planck;
+Settings.velocityThreshold = 0;
 
 export const PPM  = 64;
 export const toM  = px => px / PPM;
@@ -103,6 +104,7 @@ let wallTop, wallLeft, wallRight, wallBottom;
 let nowBarContact     = false;
 let nowBumperContact  = bumpers.map(() => false);
 let preStepSpeed      = 0;
+let diskHeld          = false;  // set each frame before world.step so handleContact can read it
 
 function makeEdgeWall(x1, y1, x2, y2){
   const b = world.createBody({ type: 'static' });
@@ -179,7 +181,7 @@ function handleContact(contact){
       else           playKnock(intensity);
     }
   }
-  if(USE_TRAIL && surface){
+  if(USE_TRAIL && surface && !diskHeld){
     notifyContact(surface);
     const p = diskBody.getPosition();
     addContactPoint(toPx(p.x), toPx(p.y));
@@ -334,9 +336,10 @@ export function update(dt){
   if(barMoved) updateBarBody();
   updateBumperBodies();
 
-  // 4. Cache pre-step speed for sound intensity (handleContact reads this).
+  // 4. Cache pre-step state for handleContact (fires during world.step).
   const vel = diskBody.getLinearVelocity();
   preStepSpeed = Math.hypot(toPx(vel.x), toPx(vel.y));
+  diskHeld = held;
   nowBarContact = false;
   nowBumperContact.fill(false);
 
