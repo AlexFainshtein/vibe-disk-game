@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Vibe Disk Game — a single-page HTML5 Canvas demo of a draggable disk with friction, wall bounces, and collision sounds. Pure static site: no build step, no dependencies, no tests.
 
-The project hosts multiple game variants that share an engine + playfield but have completely separate physics. Per-variant detail lives in dedicated docs auto-loaded below ([CLAUDE-ALEX.md](CLAUDE-ALEX.md), [CLAUDE-EUGENE.md](CLAUDE-EUGENE.md)).
+The project hosts multiple game variants that share an engine + playfield but have completely separate physics. Per-variant detail lives in dedicated docs auto-loaded below ([CLAUDE-ALEX.md](CLAUDE-ALEX.md), [CLAUDE-EUGENE.md](CLAUDE-EUGENE.md), [CLAUDE-ZEN1.md](CLAUDE-ZEN1.md)).
 
 ## Running
 
@@ -65,6 +65,7 @@ Per-variant files (entry HTML, physics, feature modules, runtime toggles) are de
 
 @./CLAUDE-ALEX.md
 @./CLAUDE-EUGENE.md
+@./CLAUDE-ZEN1.md
 
 ### Sizing
 

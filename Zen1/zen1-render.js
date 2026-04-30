@@ -13,25 +13,6 @@ export function draw(){
 
   for(const fn of renderExtras) fn(ctx);
 
-  if(!bar.hidden){
-    const bx1 = bar.x1 ?? 0;
-    const bx2 = bar.x2 ?? W;
-    const bw  = bx2 - bx1;
-    ctx.fillStyle = bar.color;
-    ctx.fillRect(bx1, bar.y, bw, bar.height);
-    const handleW = Math.min(bw * 0.15, 60);
-    const handleX = bx1 + bw / 2 - handleW / 2;
-    const handleY1 = bar.y + bar.height * 0.4;
-    const handleY2 = bar.y + bar.height * 0.6;
-    ctx.strokeStyle = 'rgba(255,255,255,0.45)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(handleX, handleY1);
-    ctx.lineTo(handleX + handleW, handleY1);
-    ctx.moveTo(handleX, handleY2);
-    ctx.lineTo(handleX + handleW, handleY2);
-    ctx.stroke();
-  }
   bar.overlay?.(ctx);
 
   const pos = diskBody.getPosition();

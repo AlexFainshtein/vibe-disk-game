@@ -1,6 +1,7 @@
 import { canvas, renderExtras } from '../state.js';
 import { disk, bar } from '../playfield.js';
 import { playChime } from '../sound.js';
+import { diskBody, toPx } from './zen1-physics.js';
 
 const NUM_TARGETS = 5;
 const TARGET_RADIUS = 24;
@@ -30,7 +31,8 @@ function tryFindSpawnPoint(){
       if(dx*dx + dy*dy < minDistFromOthers*minDistFromOthers){ ok = false; break; }
     }
     if(ok){
-      const ddx = disk.x - x, ddy = disk.y - y;
+      const dp = diskBody.getPosition();
+      const ddx = toPx(dp.x) - x, ddy = toPx(dp.y) - y;
       if(ddx*ddx + ddy*ddy < minDistFromDisk*minDistFromDisk) ok = false;
     }
     if(ok) return { x, y };
@@ -100,10 +102,12 @@ function updateLifecycle(dt){
 }
 
 function checkCollisions(){
+  const dp = diskBody.getPosition();
+  const diskPx = toPx(dp.x), diskPy = toPx(dp.y);
   for(const t of targets){
     if(t.state !== 'visible') continue;
-    const dx = disk.x - t.x;
-    const dy = disk.y - t.y;
+    const dx = diskPx - t.x;
+    const dy = diskPy - t.y;
     const r = disk.r + TARGET_RADIUS;
     if(dx*dx + dy*dy < r*r){
       t.state = 'fading';
