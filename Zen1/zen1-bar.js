@@ -64,23 +64,27 @@ bar.overlay = (c) => {
   c.fillStyle = bar.color;
   c.fill();
 
-  // Center grip lines (horizontal, at midpoint of bar)
-  const midTop = (y1 + y2) / 2;
-  const hw = Math.min(W * 0.15, 60);
-  const hx = W / 2 - hw / 2;
-  c.strokeStyle = 'rgba(255,255,255,0.45)';
+  // Grip stripes — parallel to bar surface.
+  // barY(x) gives the y of the bar's top edge at a given x.
+  function barY(x){ return y1 + (y2 - y1) * x / W; }
+
+  // Draw two stripes parallel to bar, centered at cx, spanning width sw.
+  function drawGrip(cx, sw){
+    const x0 = cx - sw / 2, x1 = cx + sw / 2;
+    c.beginPath();
+    c.moveTo(x0, barY(x0) + h * 0.35); c.lineTo(x1, barY(x1) + h * 0.35);
+    c.moveTo(x0, barY(x0) + h * 0.60); c.lineTo(x1, barY(x1) + h * 0.60);
+    c.stroke();
+  }
+
+  c.strokeStyle = 'rgba(255,255,255,0.55)';
   c.lineWidth = 2;
-  c.beginPath();
-  c.moveTo(hx, midTop + h * 0.4); c.lineTo(hx + hw, midTop + h * 0.4);
-  c.moveTo(hx, midTop + h * 0.6); c.lineTo(hx + hw, midTop + h * 0.6);
-  c.stroke();
 
-  // Left edge handle indicator
-  c.fillStyle = 'rgba(255,255,255,0.6)';
-  c.fillRect(0, y1, HANDLE_VIS, h);
-
-  // Right edge handle indicator
-  c.fillRect(W - HANDLE_VIS, y2, HANDLE_VIS, h);
+  const mw = Math.min(W * 0.15, 60);  // middle grip width
+  const sw = mw * 0.45;               // side grip width (shorter)
+  drawGrip(W / 2, mw);                // middle
+  drawGrip(HANDLE_W / 2, sw);         // left edge
+  drawGrip(W - HANDLE_W / 2, sw);     // right edge
 };
 
 // --- Input ---
