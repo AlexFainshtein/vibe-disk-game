@@ -3,29 +3,26 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Drift</title>
-  <meta name="description" content="A fidget to pass time">
-  <meta property="og:title" content="Drift">
-  <meta property="og:description" content="A fidget to pass time">
-  <meta property="og:url" content="https://vibediskgame.web.app/">
-  <meta property="og:type" content="website">
-  <meta property="og:image" content="https://vibediskgame.web.app/og-preview.png">
-  <meta name="twitter:card" content="summary">
-  <meta name="twitter:title" content="Drift">
-  <meta name="twitter:description" content="A fidget to pass time">
-  <link rel="icon" type="image/svg+xml" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" fill="%23071018"/><circle cx="16" cy="16" r="10" fill="%23888888"/></svg>'>
-  <link rel="stylesheet" href="style.css">
+  <title>Vibe Disk Game</title>
+  <style>
+    html,body{height:100%;margin:0;background:#0b0b0d;color:#e6eef6;font-family:Inter,system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial;overscroll-behavior:none;overflow:hidden;touch-action:none;display:flex;align-items:center;justify-content:center}
+    .menu{display:flex;flex-direction:column;align-items:center;gap:24px}
+    .menu h1{margin:0 0 8px 0;font-size:28px;letter-spacing:0.04em;opacity:0.9}
+    .menu a{display:block;width:220px;padding:18px 0;text-align:center;text-decoration:none;font-size:18px;font-weight:600;border-radius:12px;cursor:pointer;transition:background 0.15s}
+    #btnAlex{background:#0d2233;color:#7ecfff;border:2px solid #1a4060}
+    #btnAlex:hover{background:#153248}
+    #btnEugene{background:#2a0d1a;color:#ff9ecf;border:2px solid #601a30}
+    #btnEugene:hover{background:#3d1226}
+    #btnZen1{background:#0d2a1a;color:#7effc5;border:2px solid #1a6040}
+    #btnZen1:hover{background:#153d2a}
+  </style>
 </head>
-<body data-player="alex">
-  <canvas id="game"></canvas>
-  <div id="ui">Drift</div>
-  <div id="panel">
-    <button id="resetDisk">Reset</button>
-    <button id="pauseBtn">⏸ Pause</button>
-    <button id="slowerBtn">−</button>
-    <button id="fasterBtn">+</button>
-    <button id="reverseBtn">Erase</button>
+<body>
+  <div class="menu">
+    <h1>Vibe Disk Game</h1>
+    <a id="btnAlex" href="alex.html">Alex</a>
+    <a id="btnEugene" href="eugene.html">Eugene</a>
+    <a id="btnZen1" href="Zen1/zen1.html">Zen1</a>
   </div>
-  <script type="module" src="main.js"></script>
 </body>
 </html>
