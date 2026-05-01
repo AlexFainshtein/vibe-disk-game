@@ -4,7 +4,7 @@ Zen1 variant of the Vibe Disk Game. Auto-loaded into context via the `@`-import 
 
 ## Entry page
 
-- [Zen1/zen1.html](Zen1/zen1.html) — sets `<body data-player="zen1">`. Loads Planck.js from CDN before the ES module entry point. Has Reset, ⏸ Pause, and ◐ Color buttons in `#panel`. The `+` / `−` speed buttons live in a separate `#speed-panel` div centered at the bottom.
+- [Zen1/zen1.html](Zen1/zen1.html) — sets `<body data-player="zen1">`. Loads Planck.js from CDN before the ES module entry point. Has Reset and ◐ Color buttons in `#panel`. The `+` / `−` speed buttons live in a separate `#speed-panel` div centered at the bottom. Reached from the landing menu at [index.html](index.html). Pause is not a button — tapping empty canvas space toggles pause (handled by `zen1-pause.js` via `inputHooks.emptyDown`).
 
 ## Physics engine: Planck.js
 
@@ -21,11 +21,11 @@ Zen1 uses **Planck.js** (a JS port of Box2D, v1.0.0 from CDN) instead of the han
 
 ## Files
 
-- [Zen1/zen1-physics.js](Zen1/zen1-physics.js) — main physics module. Owns world setup, spring lifecycle, bar/bumper sync, sound dispatch, and the `update(dt)` loop. Exports `diskBody`, `anchorBody`, `toM`, `toPx`.
+- [Zen1/zen1-physics.js](Zen1/zen1-physics.js) — main physics module. Owns world setup, spring lifecycle, bar/bumper sync, sound dispatch, and the `update(dt)` loop. Exports `diskBody`, `anchorBody`, `toM`, `toPx`. Calls `setBarDownSound(() => playSurface('bar', 0.4))` on [Zen1/zen1-bar.js](Zen1/zen1-bar.js) to inject the bar-tap chime without creating a circular import.
 - [Zen1/zen1-render.js](Zen1/zen1-render.js) — custom `draw()` replacing shared `render.js`. Renders gradient background → `renderExtras` callbacks → `bar.overlay()` (the tilted trapezoid drawn by zen1-bar.js) → disk (highlight/glass/flat) → `renderOverlays` callbacks.
-- [Zen1/zen1-input.js](Zen1/zen1-input.js) — pointer event wiring. Calls `grab()` / `moveAnchor()` / `release()` exported from zen1-physics.js.
-- [Zen1/zen1-bar.js](Zen1/zen1-bar.js) — tilted trapezoid bar (see Bar section). Sets `bar.hidden = true` so the shared flat-rect draw path in render is skipped; renders via `bar.overlay`.
-- [Zen1/zen1-pause.js](Zen1/zen1-pause.js) — pause/resume. Saves and restores `diskBody` linear velocity; requires `initPause(diskBody, Vec2)` to be called after `initWorld()`. `clearPause()` is called by zen1-physics on grab so picking up a paused disk cancels pause cleanly.
+- [Zen1/zen1-input.js](Zen1/zen1-input.js) — pointer event wiring. Calls `initAudio()` on the first `pointerdown` so sound is available from the very first bounce. Calls `grab()` / `moveAnchor()` / `release()` exported from zen1-physics.js.
+- [Zen1/zen1-bar.js](Zen1/zen1-bar.js) — tilted trapezoid bar (see Bar section). Sets `bar.hidden = true` so the shared flat-rect draw path in render is skipped; renders via `bar.overlay`. Exports `setBarDownSound(fn)` so zen1-physics.js can inject the bar-tap chime after its own sound table is initialized, avoiding a circular import.
+- [Zen1/zen1-pause.js](Zen1/zen1-pause.js) — pause/resume via `inputHooks.emptyDown` (tapping empty canvas space). Saves and restores `diskBody` linear velocity; requires `initPause(diskBody, Vec2)` to be called after `initWorld()`. `clearPause()` is called by zen1-physics on grab so picking up a paused disk cancels pause cleanly.
 - [Zen1/zen1-trail.js](Zen1/zen1-trail.js) — persistent offscreen-canvas trail (see Trail section).
 - [Zen1/zen1-bumper.js](Zen1/zen1-bumper.js) — draggable circular bumper obstacle (same lifecycle as Alex's bumper; see CLAUDE-ALEX.md for the pattern).
 - [Zen1/zen1-targets.js](Zen1/zen1-targets.js) — regenerating pickup circles. **Currently disabled** (`USE_TARGETS = false`). Collision detection uses `diskBody.getPosition()` (not `disk.x/y`).
