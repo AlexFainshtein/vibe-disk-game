@@ -69,11 +69,45 @@ export function notifyBumperHit(index){
   }
 }
 
+function lighten(hex, t){
+  const r = parseInt(hex.slice(1,3), 16);
+  const g = parseInt(hex.slice(3,5), 16);
+  const b = parseInt(hex.slice(5,7), 16);
+  return `rgb(${Math.round(r+(255-r)*t)},${Math.round(g+(255-g)*t)},${Math.round(b+(255-b)*t)})`;
+}
+function darken(hex, t){
+  const r = parseInt(hex.slice(1,3), 16);
+  const g = parseInt(hex.slice(3,5), 16);
+  const b = parseInt(hex.slice(5,7), 16);
+  return `rgb(${Math.round(r*(1-t))},${Math.round(g*(1-t))},${Math.round(b*(1-t))})`;
+}
+
 function drawBumpers(c){
   bumpers.forEach(b => {
+    const { x, y, r } = b;
+
+    // drop shadow
     c.beginPath();
-    c.fillStyle = b.color;
-    c.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+    c.fillStyle = 'rgba(0,0,0,0.25)';
+    c.ellipse(x+6, y+8, r*0.95, r*0.5, 0, 0, Math.PI*2);
+    c.fill();
+
+    // shaded ball: light spot upper-left fading to base color at edge — same as disk
+    c.beginPath();
+    c.arc(x, y, r, 0, Math.PI*2);
+    const grad = c.createRadialGradient(x - r*0.4, y - r*0.4, r*0.05, x, y, r);
+    grad.addColorStop(0.0, darken(b.color, -0.15));
+//    grad.addColorStop(0, b.color);
+    grad.addColorStop(0.5, darken(b.color, 0.10));
+    grad.addColorStop(0.7, darken(b.color, 0.25));
+    grad.addColorStop(1, darken(b.color, 0.5));
+    c.fillStyle = grad;
+    c.fill();
+
+    // specular ellipse
+    c.beginPath();
+    c.fillStyle = 'rgba(255,255,255,0.06)';
+    c.ellipse(x - r*0.25, y - r*0.35, r*0.45, r*0.25, -0.5, 0, Math.PI*2);
     c.fill();
   });
 }
