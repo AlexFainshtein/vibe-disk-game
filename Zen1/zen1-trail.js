@@ -123,6 +123,8 @@ export function resetTrail(){
   offCtx.clearRect(0, 0, offscreen.width, offscreen.height);
 }
 
+export function getTrailColorMode(){ return mode; }
+
 export function cycleTrailColor(){
   mode = (mode + 1) % 3;
   currentDrawColor = PASTEL_COLORS[0]; // grey until first contact in dynamic modes

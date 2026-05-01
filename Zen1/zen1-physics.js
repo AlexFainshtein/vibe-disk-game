@@ -3,7 +3,7 @@ import { disk, bar } from '../playfield.js';
 import { playKnock, playChime, playChimeFreq } from '../sound.js';
 import { tickTargets } from './zen1-targets.js';
 import { tickBumper, bumpers, notifyBumperHit, setOnBumperGrabbed } from './zen1-bumper.js';
-import { tickTrail, pauseTrail, resetTrail, cycleTrailColor, notifyContact, addContactPoint } from './zen1-trail.js';
+import { tickTrail, pauseTrail, resetTrail, cycleTrailColor, getTrailColorMode, notifyContact, addContactPoint } from './zen1-trail.js';
 import { initPause, clearPause } from './zen1-pause.js';
 import { setBarDownSound } from './zen1-bar.js';
 
@@ -35,50 +35,90 @@ renderExtras.push(drawSpringLine);
 
 const colorBtn = document.getElementById('colorBtn');
 colorBtn?.addEventListener('pointerdown', (e) => e.stopPropagation());
-colorBtn?.addEventListener('click', cycleTrailColor);
 
 // ─── Moon mode ────────────────────────────────────────────────────────────────
 // Each row: [baseFreq, freq1, freq2, freq3]
 // baseFreq → bar; freq1/2/3 cycle across wallLeft,wallTop,wallRight,bumper1,bumper2,bumper3,wallBottom
-const MOON_TABLE = [
-  [69.30, 207.65, 277.18, 329.63], // m1
-  [123.47, 207.65, 277.18, 329.63], // m2
-  [55.00, 220.00, 277.18, 329.63], // m3
-  [46.25, 220.00, 293.66, 369.99], // m4
-  [51.91, 207.65, 261.63, 369.99], // m5
-  [51.91, 207.65, 277.18, 329.63], // m6
-  [51.91, 207.65, 277.18, 311.13], // m7
-  [51.91, 185.00, 261.63, 311.13], // m8
-  [69.30, 164.81, 207.65, 277.18], // m9
-  [69.30, 207.65, 277.18, 329.63], // m10
-  [65.41, 207.65, 311.13, 369.99], // m11
-  [69.30, 207.65, 277.18, 329.63], // m12
-  [46.25, 220.00, 277.18, 369.99], // m13
-  [61.74, 207.65, 246.94, 329.63], // m14
-  [61.74, 220.00, 246.94, 311.13], // m15
-  [82.41, 207.65, 246.94, 329.63], // m16
-  [82.41, 196.00, 246.94, 329.63], // m17
-  [73.42, 196.00, 246.94, 349.23], // m18
-  [65.41, 196.00, 261.63, 329.63], // m19
-  [61.74, 196.00, 246.94, 329.63], // m20
-  [58.27, 196.00, 277.18, 329.63], // m21
-  [58.27, 185.00, 277.18, 329.63], // m22
-  [61.74, 185.00, 246.94, 293.66], // m23
-  [82.41, 196.00, 246.94, 277.18], // m24
-  [98.00, 329.63, 246.94, 277.18], // m25
-  [92.50, 369.99, 246.94, 293.66], // m26
-  [92.50, 185.00, 246.94, 293.66], // m27
-  [46.25, 185.00, 233.08, 277.18], // m28
-  [61.74, 146.83, 185.00, 246.94], // m29
+// Format: [baseFreq, freq1, freq2, freq3, repeat]
+// repeat: how many bar-hits this row stays active (equivalent to duplicating the row that many times)
+const MOON_TABLE_RAW = [
+  [69.30, 207.65, 277.18, 329.63, 4], // m1
+  [123.47, 207.65, 277.18,329.63, 4], // m2
+  [55.00, 220.00, 277.18, 329.63, 2], // m3
+  [46.25, 220.00, 293.66, 369.99, 2], // m4
+  [51.91, 207.65, 261.63, 369.99, 2], // m5
+  [51.91, 207.65, 277.18, 329.63, 2], // m6
+  [51.91, 207.65, 277.18, 311.13, 2], // m7
+  [51.91, 185.00, 261.63, 311.13, 2], // m8
+  [69.30, 164.81, 207.65, 277.18, 4], // m9
+  [69.30, 207.65, 277.18, 329.63, 4], // m10
+  [65.41, 207.65, 311.13, 369.99, 4], // m11
+  [69.30, 207.65, 277.18, 329.63, 2], // m12
+  [46.25, 220.00, 277.18, 369.99, 2], // m13
+  [61.74, 207.65, 246.94, 329.63, 2], // m14
+  [61.74, 220.00, 246.94, 311.13, 2], // m15
+  [82.41, 207.65, 246.94, 329.63, 4], // m16
+  [82.41, 196.00, 246.94, 329.63, 4], // m17
+  [73.42, 196.00, 246.94, 349.23, 4], // m18
+  [65.41, 196.00, 261.63, 329.63, 2], // m19
+  [61.74, 196.00, 246.94, 329.63, 2], // m20
+  [58.27, 196.00, 277.18, 329.63, 2], // m21
+  [58.27, 185.00, 277.18, 329.63, 2], // m22
+  [61.74, 185.00, 246.94, 293.66, 2], // m23
+  [82.41, 196.00, 246.94, 277.18, 2], // m24
+  [98.00, 329.63, 246.94, 277.18, 2], // m25
+  [92.50, 369.99, 246.94, 293.66, 1], // m26
+  [92.50, 185.00, 246.94, 293.66, 1], // m27
+  [46.25, 185.00, 233.08, 277.18, 2], // m28
+  [61.74, 146.83, 185.00, 246.94, 4], // m29
+  [61.74, 1, 1, 1, 4], // m30? 0
+  [69.30, 1, 1, 1, 4], // m30? 0
+
+  /*
+  // Memo to Claude: don't erase this commented-out table!
+  [69.30, 207.65, 277.18, 329.63, 4], // m1
+  [123.47, 207.65, 277.18,329.63, 4], // m2
+  [55.00, 220.00, 277.18, 329.63, 2], // m3
+  [46.25, 220.00, 293.66, 369.99, 2], // m4
+  [51.91, 207.65, 261.63, 369.99, 1], // m5
+  [51.91, 207.65, 277.18, 329.63, 1], // m6
+  [51.91, 207.65, 277.18, 311.13, 1], // m7
+  [51.91, 185.00, 261.63, 311.13, 1], // m8
+  [69.30, 164.81, 207.65, 277.18, 2], // m9
+  [69.30, 207.65, 277.18, 329.63, 2], // m10
+  [65.41, 207.65, 311.13, 369.99, 4], // m11
+  [69.30, 207.65, 277.18, 329.63, 2], // m12
+  [46.25, 220.00, 277.18, 369.99, 2], // m13
+  [61.74, 207.65, 246.94, 329.63, 2], // m14
+  [61.74, 220.00, 246.94, 311.13, 2], // m15
+  [82.41, 207.65, 246.94, 329.63, 4], // m16
+  [82.41, 196.00, 246.94, 329.63, 4], // m17
+  [73.42, 196.00, 246.94, 349.23, 4], // m18
+  [65.41, 196.00, 261.63, 329.63, 1], // m19
+  [61.74, 196.00, 246.94, 329.63, 1], // m20
+  [58.27, 196.00, 277.18, 329.63, 1], // m21
+  [58.27, 185.00, 277.18, 329.63, 1], // m22
+  [61.74, 185.00, 246.94, 293.66, 2], // m23
+  [82.41, 196.00, 246.94, 277.18, 1], // m24
+  [98.00, 329.63, 246.94, 277.18, 1], // m25
+  [92.50, 369.99, 246.94, 293.66, 1], // m26
+  [92.50, 185.00, 246.94, 293.66, 1], // m27
+  [46.25, 185.00, 233.08, 277.18, 2], // m28
+  [61.74, 146.83, 185.00, 246.94, 8], // m29
+*/  
 ];
+const MOON_TABLE = MOON_TABLE_RAW.flatMap(
+  ([b, f1, f2, f3, repeat]) => Array.from({ length: repeat }, () => [b, f1, f2, f3])
+);
 const MOON_SURFACE_ORDER  = ['wallLeft','wallTop','wallRight','bumper1','bumper2','bumper3','wallBottom'];
 const MOON_BASE_DECAY        = 4.0;  // seconds
 const MOON_OCTAVE_SHIFT      = 1;    // octaves above base for the doubled note
 const MOON_BASE_INTENSITY    = 0.15;  // intensity multiplier for the base note
 const MOON_OCTAVE_INTENSITY  = 0.35;  // intensity multiplier for the octave-shifted note
 
-let moonMode     = false;
-let moonRowIndex = 0;
+let moonMode      = 0;  // 0 = off, 1 = surface-mapped, 2 = sequential
+let moonRowIndex  = 0;
+let moonNoteIndex = 0;  // position within the 3-note combo for state 2
 
 function moonFreqForSurface(surface){
   const i = MOON_SURFACE_ORDER.indexOf(surface);
@@ -86,12 +126,21 @@ function moonFreqForSurface(surface){
   return MOON_TABLE[moonRowIndex][(i % 3) + 1];
 }
 
+function updateButtonLabels(){
+  if(colorBtn) colorBtn.textContent = `◐ Color ${getTrailColorMode()}`;
+  if(moonBtn)  moonBtn.textContent  = `☽ Moon ${moonMode}`;
+}
+
 const moonBtn = document.getElementById('moonBtn');
 moonBtn?.addEventListener('pointerdown', (e) => e.stopPropagation());
 moonBtn?.addEventListener('click', () => {
-  moonMode = !moonMode;
-  moonRowIndex = 0;
+  moonMode = (moonMode + 1) % 3;
+  moonRowIndex  = 0;
+  moonNoteIndex = 0;
+  updateButtonLabels();
 });
+colorBtn?.addEventListener('click', () => { cycleTrailColor(); updateButtonLabels(); });
+updateButtonLabels();
 document.getElementById('resetDisk')?.addEventListener('click', () => {
   diskBody.setPosition(Vec2(toM(canvas.width / 2), toM(canvas.height / 2)));
   diskBody.setLinearVelocity(Vec2(0, 0));
@@ -320,10 +369,18 @@ const SURFACE_SOUND = {
 };
 
 function playSurface(surface, intensity){
-  if(moonMode && surface !== 'bar'){
-    const freq = moonFreqForSurface(surface);
-    if(freq) playChimeFreq(intensity, freq);
-    return;
+  if(surface !== 'bar'){
+    if(moonMode === 1){
+      const freq = moonFreqForSurface(surface);
+      if(freq) playChimeFreq(intensity, freq);
+      return;
+    }
+    if(moonMode === 2){
+      const freq = MOON_TABLE[moonRowIndex][moonNoteIndex % 3 + 1];
+      moonNoteIndex++;
+      playChimeFreq(intensity, freq);
+      return;
+    }
   }
   const s = SURFACE_SOUND[surface];
   if(!s) return;
@@ -464,7 +521,8 @@ export function update(dt){
     const approach  = Math.max(Math.abs(diskVy), Math.abs(bar.vy));
     const intensity = Math.max(0.15, Math.min(approach / MAX_BOUNCE_SPEED, 1));
     if(moonMode){
-      moonRowIndex = (moonRowIndex + 1) % MOON_TABLE.length;
+      moonRowIndex  = (moonRowIndex + 1) % MOON_TABLE.length;
+      moonNoteIndex = 0;
       const baseFreq = MOON_TABLE[moonRowIndex][0];
       playChimeFreq(intensity * MOON_BASE_INTENSITY, baseFreq, MOON_BASE_DECAY);
       playChimeFreq(intensity * MOON_OCTAVE_INTENSITY, baseFreq * Math.pow(2, MOON_OCTAVE_SHIFT), MOON_BASE_DECAY);
