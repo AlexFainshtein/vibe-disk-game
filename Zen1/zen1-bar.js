@@ -59,14 +59,45 @@ export function snapAngle(theta){
 bar.overlay = (c) => {
   const y1 = bar.y1, y2 = bar.y2, h = bar.height, W = canvas.width;
 
-  // Trapezoid body
+  // Compensate for tilt: perpendicular thickness = h·cos(θ), so draw height = h/cos(θ)
+  // to keep apparent thickness constant regardless of slant.
+  const dy   = y2 - y1;
+  const hVis = h * Math.hypot(W, dy) / W;
+
+  // Trapezoid body — solid base color
   c.beginPath();
   c.moveTo(0, y1);
   c.lineTo(W, y2);
-  c.lineTo(W, y2 + h);
-  c.lineTo(0, y1 + h);
+  c.lineTo(W, y2 + hVis);
+  c.lineTo(0, y1 + hVis);
   c.closePath();
   c.fillStyle = bar.color;
+  c.fill();
+
+  // 3D gradient overlay: dark at top/bottom edges, bright in the middle.
+  // Gradient runs perpendicular to the bar surface along its normal.
+  // With hVis as the perpendicular thickness the gradient endpoints simplify to:
+  //   p0 = (W/2, (y1+y2)/2)
+  //   p1 = (W/2 - hVis·dy/√(W²+dy²), (y1+y2)/2 + hVis·W/√(W²+dy²))
+  const len  = Math.hypot(W, dy);
+  const mx = W / 2, my = (y1 + y2) / 2;
+  const ex = mx - h * dy / len;
+  const ey = my + h * W  / len;
+  const grad = c.createLinearGradient(mx, my, ex, ey);
+  grad.addColorStop(0,    'rgba(0,0,0,0.15)');
+  grad.addColorStop(0.25, 'rgba(255,255,255,0.15)');
+  grad.addColorStop(0.35, 'rgba(255,255,255,0.21)');
+  grad.addColorStop(0.5,  'rgba(255,255,255,0.27)');
+  grad.addColorStop(0.65, 'rgba(255,255,255,0.21)');
+  grad.addColorStop(0.75, 'rgba(255,255,255,0.15)');
+  grad.addColorStop(1,    'rgba(0,0,0,0.15)');
+  c.beginPath();
+  c.moveTo(0, y1);
+  c.lineTo(W, y2);
+  c.lineTo(W, y2 + hVis);
+  c.lineTo(0, y1 + hVis);
+  c.closePath();
+  c.fillStyle = grad;
   c.fill();
 
   // Grip stripes — parallel to bar surface.
@@ -77,8 +108,8 @@ bar.overlay = (c) => {
   function drawGrip(cx, sw){
     const x0 = cx - sw / 2, x1 = cx + sw / 2;
     c.beginPath();
-    c.moveTo(x0, barY(x0) + h * 0.35); c.lineTo(x1, barY(x1) + h * 0.35);
-    c.moveTo(x0, barY(x0) + h * 0.60); c.lineTo(x1, barY(x1) + h * 0.60);
+    c.moveTo(x0, barY(x0) + hVis * 0.35); c.lineTo(x1, barY(x1) + hVis * 0.35);
+    c.moveTo(x0, barY(x0) + hVis * 0.60); c.lineTo(x1, barY(x1) + hVis * 0.60);
     c.stroke();
   }
 
