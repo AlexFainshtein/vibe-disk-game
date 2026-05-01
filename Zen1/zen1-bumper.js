@@ -18,12 +18,12 @@ function defaultPositions(){
 }
 
 // Gesture constants — declared before resize listener that references them
-const RESIZE_BLOCK_MS      = 150;   // ignore curvature for this long after grab
-const RESIZE_AREA_THRESH   = 800;   // signed-area threshold to enter resize mode
-const RESIZE_RATE          = 6;     // radius px change per unit of normalized area
-export const MIN_RADIUS_FRAC = 1/20;  // smallest bumper as fraction of short canvas side
-export const MAX_RADIUS_FRAC = 1;     // largest bumper as fraction of short canvas side
-const TRAIL_DURATION_MS    = 250;   // how long trail points are kept (like WhirlZoomMap)
+const RESIZE_BLOCK_MS        =  150;   // ignore curvature for this long after grab
+const RESIZE_AREA_FRAC       =  0.01;  // resize activates when swirl area exceeds this fraction of screen area
+const RESIZE_RATE            =  6;     // radius px change per unit of normalized area
+export const MIN_RADIUS_FRAC =  1/20;  // smallest bumper as fraction of short canvas side
+export const MAX_RADIUS_FRAC =  1;     // largest bumper as fraction of short canvas side
+const TRAIL_DURATION_MS      =  250;   // how long trail points are kept (like WhirlZoomMap)
 
 const BUMPER_DEFS = [
   { color: '#c0392b' },  // red
@@ -178,7 +178,7 @@ function init(){
 
       const elapsed = now - dragStartTime;
       if(!resizeMode && elapsed > RESIZE_BLOCK_MS){
-        if(Math.abs(area) > RESIZE_AREA_THRESH) resizeMode = true;
+        if(Math.abs(area) > canvas.width * canvas.height * RESIZE_AREA_FRAC) resizeMode = true;
       }
 
       // Add current point to trail after area computation
