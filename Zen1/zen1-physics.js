@@ -110,20 +110,27 @@ const MOON_TABLE_RAW = [
 const MOON_TABLE = MOON_TABLE_RAW.flatMap(
   ([b, f1, f2, f3, repeat]) => Array.from({ length: repeat }, () => [b, f1, f2, f3])
 );
-const MOON_SURFACE_ORDER  = ['wallLeft','wallTop','wallRight','bumper1','bumper2','bumper3','wallBottom'];
 const MOON_BASE_DECAY        = 4.0;  // seconds
 const MOON_OCTAVE_SHIFT      = 1;    // octaves above base for the doubled note
 const MOON_BASE_INTENSITY    = 0.15;  // intensity multiplier for the base note
 const MOON_OCTAVE_INTENSITY  = 0.35;  // intensity multiplier for the octave-shifted note
+const MOON_BUMPER_INTENSITY  = 0.50;  // intensity multiplier for bumper notes in mode 1
 
-let moonMode      = 0;  // 0 = off, 1 = surface-mapped, 2 = sequential
-let moonRowIndex  = 0;
-let moonNoteIndex = 0;  // position within the 3-note combo for state 2
+let moonMode     = 0;  // 0 = off, 1 = surface-mapped
+let moonRowIndex = 0;
 
 function moonFreqForSurface(surface){
-  const i = MOON_SURFACE_ORDER.indexOf(surface);
-  if(i < 0) return null;
-  return MOON_TABLE[moonRowIndex][(i % 3) + 1];
+  const row = MOON_TABLE[moonRowIndex];
+  switch(surface){
+    case 'wallLeft':   return row[1];
+    case 'wallTop':    return row[2];
+    case 'wallRight':  return row[3];
+    case 'bumper1':    return row[1] / 2;  // one octave down
+    case 'bumper2':    return row[2] / 2;
+    case 'bumper3':    return row[3] / 2;
+    case 'wallBottom': return row[0] * 2;  // base note, one octave up
+    default:           return null;
+  }
 }
 
 function updateButtonLabels(){
@@ -134,9 +141,8 @@ function updateButtonLabels(){
 const moonBtn = document.getElementById('moonBtn');
 moonBtn?.addEventListener('pointerdown', (e) => e.stopPropagation());
 moonBtn?.addEventListener('click', () => {
-  moonMode = (moonMode + 1) % 3;
-  moonRowIndex  = 0;
-  moonNoteIndex = 0;
+  moonMode = (moonMode + 1) % 2;
+  moonRowIndex = 0;
   updateButtonLabels();
 });
 colorBtn?.addEventListener('click', () => { cycleTrailColor(); updateButtonLabels(); });
@@ -372,15 +378,14 @@ function playSurface(surface, intensity){
   if(surface !== 'bar'){
     if(moonMode === 1){
       const freq = moonFreqForSurface(surface);
-      if(freq) playChimeFreq(intensity, freq);
+      if(freq){
+        const vol      = surface.startsWith('bumper') ? intensity * MOON_BUMPER_INTENSITY : intensity;
+        const duration = surface === 'wallBottom' ? MOON_BASE_DECAY / 2 : 0.4;
+        playChimeFreq(vol, freq, duration);
+      }
       return;
     }
-    if(moonMode === 2){
-      const freq = MOON_TABLE[moonRowIndex][moonNoteIndex % 3 + 1];
-      moonNoteIndex++;
-      playChimeFreq(intensity, freq);
-      return;
-    }
+
   }
   const s = SURFACE_SOUND[surface];
   if(!s) return;
@@ -521,8 +526,7 @@ export function update(dt){
     const approach  = Math.max(Math.abs(diskVy), Math.abs(bar.vy));
     const intensity = Math.max(0.15, Math.min(approach / MAX_BOUNCE_SPEED, 1));
     if(moonMode){
-      moonRowIndex  = (moonRowIndex + 1) % MOON_TABLE.length;
-      moonNoteIndex = 0;
+      moonRowIndex = (moonRowIndex + 1) % MOON_TABLE.length;
       const baseFreq = MOON_TABLE[moonRowIndex][0];
       playChimeFreq(intensity * MOON_BASE_INTENSITY, baseFreq, MOON_BASE_DECAY);
       playChimeFreq(intensity * MOON_OCTAVE_INTENSITY, baseFreq * Math.pow(2, MOON_OCTAVE_SHIFT), MOON_BASE_DECAY);
