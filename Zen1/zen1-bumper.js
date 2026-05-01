@@ -110,7 +110,7 @@ function init(){
 
   const prevDown = inputHooks.emptyDown;
   inputHooks.emptyDown = (x, y) => {
-    for(let i = 0; i < bumpers.length; i++){
+    for(let i = bumpers.length - 1; i >= 0; i--){
       const b = bumpers[i];
       const dx = x - b.x, dy = y - b.y;
       if(dx*dx + dy*dy <= b.r * b.r){
