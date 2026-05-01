@@ -112,8 +112,8 @@ const MOON_TABLE = MOON_TABLE_RAW.flatMap(
 );
 const MOON_BASE_DECAY        = 4.0;  // seconds
 const MOON_OCTAVE_SHIFT      = 1;    // octaves above base for the doubled note
-const MOON_BASE_INTENSITY    = 0.15;  // intensity multiplier for the base note
-const MOON_OCTAVE_INTENSITY  = 0.35;  // intensity multiplier for the octave-shifted note
+const MOON_BAR_BASE_INTENSITY   = 2*0.15;  // intensity multiplier for the base note
+const MOON_BAR_OCTAVE_INTENSITY = 2*0.35;  // intensity multiplier for the octave-shifted note
 const MOON_BUMPER_INTENSITY  = 0.50;  // intensity multiplier for bumper notes in mode 1
 const BAR0_HIT_INTENSITY     = 0.250;  // volume for Moon-0 bar hit random note
 
@@ -514,8 +514,8 @@ function playBarHit(intensity){
   if(moonMode){
     moonRowIndex = (moonRowIndex + 1) % MOON_TABLE.length;
     const baseFreq = MOON_TABLE[moonRowIndex][0];
-    playChimeFreq(intensity * MOON_BASE_INTENSITY, baseFreq, MOON_BASE_DECAY);
-    playChimeFreq(intensity * MOON_OCTAVE_INTENSITY, baseFreq * Math.pow(2, MOON_OCTAVE_SHIFT), MOON_BASE_DECAY);
+    playChimeFreq(intensity * MOON_BAR_BASE_INTENSITY, baseFreq, MOON_BASE_DECAY);
+    playChimeFreq(intensity * MOON_BAR_OCTAVE_INTENSITY, baseFreq * Math.pow(2, MOON_OCTAVE_SHIFT), MOON_BASE_DECAY);
   } else if(USE_CHIMES){
     const s = SURFACE_SOUND['bar'];
     if(s?.type === 'chime'){
