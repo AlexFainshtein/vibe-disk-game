@@ -97,7 +97,7 @@ export const toM  = px => px / PPM;
 export const toPx = m  => m  * PPM;
 
 export let diskBody, anchorBody;
-let world, barBody, bumperBodies = [];
+let world, barBody, bumperBodies = [], bumperFixtures = [], bumperPrevR = [];
 let barFixture = null;
 let springJoint = null;
 let wallTop, wallLeft, wallRight, wallBottom;
@@ -132,9 +132,13 @@ function initWorld(){
   barBody = world.createBody({ type: 'static', position: Vec2(0, 0) });
   barFixture = null;
 
+  bumperFixtures = [];
+  bumperPrevR    = [];
   bumperBodies = bumpers.map(b => {
-    const body = world.createBody({ type: 'kinematic', position: Vec2(toM(b.x), toM(b.y)) });
-    body.createFixture(Circle(toM(b.r)), { restitution: 0, friction: 0 });
+    const body    = world.createBody({ type: 'kinematic', position: Vec2(toM(b.x), toM(b.y)) });
+    const fixture = body.createFixture(Circle(toM(b.r)), { restitution: 0, friction: 0 });
+    bumperFixtures.push(fixture);
+    bumperPrevR.push(b.r);
     return body;
   });
 
@@ -324,6 +328,13 @@ function updateBumperBodies(){
   bumpers.forEach((b, i) => {
     bumperBodies[i].setPosition(Vec2(toM(b.x), toM(b.y)));
     bumperBodies[i].setLinearVelocity(Vec2(0, 0));
+    if(b.r !== bumperPrevR[i]){
+      bumperBodies[i].destroyFixture(bumperFixtures[i]);
+      bumperFixtures[i] = bumperBodies[i].createFixture(
+        Circle(toM(b.r)), { restitution: 0, friction: 0 }
+      );
+      bumperPrevR[i] = b.r;
+    }
   });
 }
 
