@@ -509,8 +509,21 @@ function playSurface(surface, intensity){
   else                   playChimeFreq(intensity, transposedFreq(s));
 }
 
+function playBarHit(intensity){
+  if(moonMode){
+    moonRowIndex = (moonRowIndex + 1) % MOON_TABLE.length;
+    const baseFreq = MOON_TABLE[moonRowIndex][0];
+    playChimeFreq(intensity * MOON_BASE_INTENSITY, baseFreq, MOON_BASE_DECAY);
+    playChimeFreq(intensity * MOON_OCTAVE_INTENSITY, baseFreq * Math.pow(2, MOON_OCTAVE_SHIFT), MOON_BASE_DECAY);
+  } else if(USE_CHIMES){
+    playSurface('bar', intensity);
+  } else {
+    playKnock(intensity);
+  }
+}
+
 setOnBumperGrabbed((i) => playSurface('bumper' + (i + 1), 0.4));
-setBarDownSound(() => playSurface('bar', 0.4));
+setBarDownSound(() => playBarHit(0.4));
 
 function destroySpringJoint(){
   if(springJoint){ world.destroyJoint(springJoint); springJoint = null; }
@@ -641,16 +654,7 @@ export function update(dt){
     const diskVy   = toPx(diskBody.getLinearVelocity().y);
     const approach  = Math.max(Math.abs(diskVy), Math.abs(bar.vy));
     const intensity = Math.max(0.15, Math.min(approach / MAX_BOUNCE_SPEED, 1));
-    if(moonMode){
-      moonRowIndex = (moonRowIndex + 1) % MOON_TABLE.length;
-      const baseFreq = MOON_TABLE[moonRowIndex][0];
-      playChimeFreq(intensity * MOON_BASE_INTENSITY, baseFreq, MOON_BASE_DECAY);
-      playChimeFreq(intensity * MOON_OCTAVE_INTENSITY, baseFreq * Math.pow(2, MOON_OCTAVE_SHIFT), MOON_BASE_DECAY);
-    } else if(USE_CHIMES){
-      playSurface('bar', intensity);
-    } else {
-      playKnock(intensity);
-    }
+    playBarHit(intensity);
   }
   bumpers.forEach((b, i) => {
     if(nowBumperContact[i] && !wasBumperContact[i]){
