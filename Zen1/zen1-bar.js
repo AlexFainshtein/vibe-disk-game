@@ -1,6 +1,8 @@
 import { canvas, inputHooks } from '../state.js';
 import { bar, disk } from '../playfield.js';
-import { playGrab, playRelease } from '../sound.js';
+
+let _barDownSound = null;
+export function setBarDownSound(fn){ _barDownSound = fn; }
 
 // Zen1 bar: tilted trapezoid with independently draggable left/right edges.
 // bar.y1 = Y of left edge top, bar.y2 = Y of right edge top.
@@ -118,7 +120,7 @@ inputHooks.barDown = (x, y) => {
   } else {
     dragMode = 'middle';
   }
-  playGrab();
+  if(_barDownSound) _barDownSound();
   return true;
 };
 
@@ -147,6 +149,6 @@ inputHooks.emptyMove = (x, y) => {
 };
 
 inputHooks.emptyUp = () => {
-  if(dragMode){ dragMode = null; playRelease(); }
+  if(dragMode){ dragMode = null; }
   else if(prevEmptyUp) prevEmptyUp();
 };

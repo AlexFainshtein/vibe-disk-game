@@ -1,6 +1,6 @@
 import { canvas, inputHooks } from '../state.js';
 import { disk, bar, clampBarY } from '../playfield.js';
-import { playGrab, playRelease } from '../sound.js';
+import { playGrab, playRelease, initAudio } from '../sound.js';
 import { diskBody, toPx, grab, release, moveAnchor } from './zen1-physics.js';
 
 function eventPos(e){
@@ -18,6 +18,7 @@ export function setupInput(){
   canvas.addEventListener('touchstart', (e) => { if(Date.now() - lastTouchEnd <= 500) e.preventDefault(); }, { passive: false });
 
   canvas.addEventListener('pointerdown', (ev) => {
+    initAudio();
     const p = eventPos(ev);
 
     const barBottom = (bar.y2 != null ? Math.max(bar.y1, bar.y2) : bar.y) + bar.height;
@@ -30,7 +31,6 @@ export function setupInput(){
     if(!bar.hidden && inBarBounds){
       bar.dragging = true;
       barGrabOffset = bar.y - p.y;
-      playGrab();
       canvas.setPointerCapture(ev.pointerId);
       return;
     }

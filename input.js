@@ -1,6 +1,6 @@
 import { canvas, inputHooks } from './state.js';
 import { disk, bar, diskHistory, anchor, clampBarY } from './playfield.js';
-import { playGrab, playRelease } from './sound.js';
+import { playGrab, playRelease, initAudio } from './sound.js';
 
 function eventPos(e){
   if(e.touches && e.touches.length) e = e.touches[0];
@@ -25,6 +25,7 @@ export function setupInput(){
   canvas.addEventListener('touchstart', (e) => { if(Date.now() - lastTouchEnd <= 500) e.preventDefault(); }, { passive: false });
 
   canvas.addEventListener('pointerdown', (ev)=>{
+    initAudio();
     const p = eventPos(ev);
 
     // Check bar hit first (must click directly on the bar).

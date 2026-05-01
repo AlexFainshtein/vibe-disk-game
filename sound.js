@@ -5,6 +5,11 @@ function getCtx(){
   return ctx;
 }
 
+export function initAudio(){
+  const ac = getCtx();
+  if(ac.state === 'suspended') ac.resume();
+}
+
 export function playKnock(intensity){
   const ac = getCtx();
   if(ac.state === 'suspended') ac.resume();

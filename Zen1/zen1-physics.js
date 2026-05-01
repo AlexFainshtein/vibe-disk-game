@@ -5,7 +5,7 @@ import { tickTargets } from './zen1-targets.js';
 import { tickBumper, bumpers, notifyBumperHit, setOnBumperGrabbed } from './zen1-bumper.js';
 import { tickTrail, pauseTrail, resetTrail, cycleTrailColor, notifyContact, addContactPoint } from './zen1-trail.js';
 import { initPause, clearPause } from './zen1-pause.js';
-import './zen1-bar.js';
+import { setBarDownSound } from './zen1-bar.js';
 
 window.ZEN1_VERSION = 'planck-1';
 
@@ -271,6 +271,7 @@ function playSurface(surface, intensity){
 }
 
 setOnBumperGrabbed((i) => playSurface('bumper' + (i + 1), 0.4));
+setBarDownSound(() => playSurface('bar', 0.4));
 
 function destroySpringJoint(){
   if(springJoint){ world.destroyJoint(springJoint); springJoint = null; }
