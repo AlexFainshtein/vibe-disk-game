@@ -115,6 +115,7 @@ const MOON_OCTAVE_SHIFT      = 1;    // octaves above base for the doubled note
 const MOON_BASE_INTENSITY    = 0.15;  // intensity multiplier for the base note
 const MOON_OCTAVE_INTENSITY  = 0.35;  // intensity multiplier for the octave-shifted note
 const MOON_BUMPER_INTENSITY  = 0.50;  // intensity multiplier for bumper notes in mode 1
+const BAR0_HIT_INTENSITY     = 0.250;  // volume for Moon-0 bar hit random note
 
 let moonMode     = 0;  // 0 = off, 1 = surface-mapped
 let moonRowIndex = 0;
@@ -516,7 +517,18 @@ function playBarHit(intensity){
     playChimeFreq(intensity * MOON_BASE_INTENSITY, baseFreq, MOON_BASE_DECAY);
     playChimeFreq(intensity * MOON_OCTAVE_INTENSITY, baseFreq * Math.pow(2, MOON_OCTAVE_SHIFT), MOON_BASE_DECAY);
   } else if(USE_CHIMES){
-    playSurface('bar', intensity);
+    const s = SURFACE_SOUND['bar'];
+    if(s?.type === 'chime'){
+      // Random chromatic note within the octave below the bar note (0–11 semitones above freq/2)
+      const baseFreq = transposedFreq(s);
+      const semitone = Math.floor(Math.random() * 12);
+      const freq     = baseFreq * Math.pow(2, semitone / 12);
+      playChimeFreq(BAR0_HIT_INTENSITY, freq/2, MOON_BASE_DECAY/4);
+      //playChimeFreq(BAR0_HIT_INTENSITY, s.freq/2, MOON_BASE_DECAY/4);
+      //playKnock(intensity/2);
+    } else {
+      playKnock(intensity);
+    }
   } else {
     playKnock(intensity);
   }
