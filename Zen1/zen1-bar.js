@@ -24,8 +24,8 @@ function resetToFlat(){
   bar.y1 = initialBarY();
   bar.y2 = initialBarY();
   bar.y  = bar.y1;
-  bar.prevY1 = bar.y1;
-  bar.prevY2 = bar.y2;
+  bar.prevY1 = null;
+  bar.prevY2 = null;
 }
 window.addEventListener('resize', resetToFlat, { passive: true });
 document.getElementById('resetDisk')?.addEventListener('click', resetToFlat);
