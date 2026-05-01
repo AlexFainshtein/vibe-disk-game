@@ -71,7 +71,11 @@ const MOON_TABLE = [
   [46.25, 185.00, 233.08, 277.18], // m28
   [61.74, 146.83, 185.00, 246.94], // m29
 ];
-const MOON_SURFACE_ORDER = ['wallLeft','wallTop','wallRight','bumper1','bumper2','bumper3','wallBottom'];
+const MOON_SURFACE_ORDER  = ['wallLeft','wallTop','wallRight','bumper1','bumper2','bumper3','wallBottom'];
+const MOON_BASE_DECAY        = 4.0;  // seconds
+const MOON_OCTAVE_SHIFT      = 1;    // octaves above base for the doubled note
+const MOON_BASE_INTENSITY    = 0.15;  // intensity multiplier for the base note
+const MOON_OCTAVE_INTENSITY  = 0.35;  // intensity multiplier for the octave-shifted note
 
 let moonMode     = false;
 let moonRowIndex = 0;
@@ -87,9 +91,7 @@ moonBtn?.addEventListener('pointerdown', (e) => e.stopPropagation());
 moonBtn?.addEventListener('click', () => {
   moonMode = !moonMode;
   moonRowIndex = 0;
-  moonBtn.style.opacity = moonMode ? '1' : '0.45';
 });
-if(moonBtn) moonBtn.style.opacity = '0.45';
 document.getElementById('resetDisk')?.addEventListener('click', () => {
   diskBody.setPosition(Vec2(toM(canvas.width / 2), toM(canvas.height / 2)));
   diskBody.setLinearVelocity(Vec2(0, 0));
@@ -463,7 +465,9 @@ export function update(dt){
     const intensity = Math.max(0.15, Math.min(approach / MAX_BOUNCE_SPEED, 1));
     if(moonMode){
       moonRowIndex = (moonRowIndex + 1) % MOON_TABLE.length;
-      playChimeFreq(intensity, MOON_TABLE[moonRowIndex][0], 4.0);
+      const baseFreq = MOON_TABLE[moonRowIndex][0];
+      playChimeFreq(intensity * MOON_BASE_INTENSITY, baseFreq, MOON_BASE_DECAY);
+      playChimeFreq(intensity * MOON_OCTAVE_INTENSITY, baseFreq * Math.pow(2, MOON_OCTAVE_SHIFT), MOON_BASE_DECAY);
     } else if(USE_CHIMES){
       playSurface('bar', intensity);
     } else {

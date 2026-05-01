@@ -44,7 +44,7 @@ export function playChimeFreq(intensity, freq, duration = 0.4){
   const ac = getCtx();
   if(ac.state === 'suspended') ac.resume();
 
-  const vol = 0.15 + 0.45 * intensity;
+  const vol = 0.6 * intensity;
 
   const osc = ac.createOscillator();
   const gain = ac.createGain();
