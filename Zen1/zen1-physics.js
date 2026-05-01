@@ -36,6 +36,60 @@ renderExtras.push(drawSpringLine);
 const colorBtn = document.getElementById('colorBtn');
 colorBtn?.addEventListener('pointerdown', (e) => e.stopPropagation());
 colorBtn?.addEventListener('click', cycleTrailColor);
+
+// ─── Moon mode ────────────────────────────────────────────────────────────────
+// Each row: [baseFreq, freq1, freq2, freq3]
+// baseFreq → bar; freq1/2/3 cycle across wallLeft,wallTop,wallRight,bumper1,bumper2,bumper3,wallBottom
+const MOON_TABLE = [
+  [69.30, 207.65, 277.18, 329.63], // m1
+  [123.47, 207.65, 277.18, 329.63], // m2
+  [55.00, 220.00, 277.18, 329.63], // m3
+  [46.25, 220.00, 293.66, 369.99], // m4
+  [51.91, 207.65, 261.63, 369.99], // m5
+  [51.91, 207.65, 277.18, 329.63], // m6
+  [51.91, 207.65, 277.18, 311.13], // m7
+  [51.91, 185.00, 261.63, 311.13], // m8
+  [69.30, 164.81, 207.65, 277.18], // m9
+  [69.30, 207.65, 277.18, 329.63], // m10
+  [65.41, 207.65, 311.13, 369.99], // m11
+  [69.30, 207.65, 277.18, 329.63], // m12
+  [46.25, 220.00, 277.18, 369.99], // m13
+  [61.74, 207.65, 246.94, 329.63], // m14
+  [61.74, 220.00, 246.94, 311.13], // m15
+  [82.41, 207.65, 246.94, 329.63], // m16
+  [82.41, 196.00, 246.94, 329.63], // m17
+  [73.42, 196.00, 246.94, 349.23], // m18
+  [65.41, 196.00, 261.63, 329.63], // m19
+  [61.74, 196.00, 246.94, 329.63], // m20
+  [58.27, 196.00, 277.18, 329.63], // m21
+  [58.27, 185.00, 277.18, 329.63], // m22
+  [61.74, 185.00, 246.94, 293.66], // m23
+  [82.41, 196.00, 246.94, 277.18], // m24
+  [98.00, 329.63, 246.94, 277.18], // m25
+  [92.50, 369.99, 246.94, 293.66], // m26
+  [92.50, 185.00, 246.94, 293.66], // m27
+  [46.25, 185.00, 233.08, 277.18], // m28
+  [61.74, 146.83, 185.00, 246.94], // m29
+];
+const MOON_SURFACE_ORDER = ['wallLeft','wallTop','wallRight','bumper1','bumper2','bumper3','wallBottom'];
+
+let moonMode     = false;
+let moonRowIndex = 0;
+
+function moonFreqForSurface(surface){
+  const i = MOON_SURFACE_ORDER.indexOf(surface);
+  if(i < 0) return null;
+  return MOON_TABLE[moonRowIndex][(i % 3) + 1];
+}
+
+const moonBtn = document.getElementById('moonBtn');
+moonBtn?.addEventListener('pointerdown', (e) => e.stopPropagation());
+moonBtn?.addEventListener('click', () => {
+  moonMode = !moonMode;
+  moonRowIndex = 0;
+  moonBtn.style.opacity = moonMode ? '1' : '0.45';
+});
+if(moonBtn) moonBtn.style.opacity = '0.45';
 document.getElementById('resetDisk')?.addEventListener('click', () => {
   diskBody.setPosition(Vec2(toM(canvas.width / 2), toM(canvas.height / 2)));
   diskBody.setLinearVelocity(Vec2(0, 0));
@@ -264,6 +318,11 @@ const SURFACE_SOUND = {
 };
 
 function playSurface(surface, intensity){
+  if(moonMode && surface !== 'bar'){
+    const freq = moonFreqForSurface(surface);
+    if(freq) playChimeFreq(intensity, freq);
+    return;
+  }
   const s = SURFACE_SOUND[surface];
   if(!s) return;
   if(s.type === 'knock') playKnock(intensity);
@@ -402,8 +461,14 @@ export function update(dt){
     const diskVy   = toPx(diskBody.getLinearVelocity().y);
     const approach  = Math.max(Math.abs(diskVy), Math.abs(bar.vy));
     const intensity = Math.max(0.15, Math.min(approach / MAX_BOUNCE_SPEED, 1));
-    if(USE_CHIMES) playSurface('bar', intensity);
-    else           playKnock(intensity);
+    if(moonMode){
+      moonRowIndex = (moonRowIndex + 1) % MOON_TABLE.length;
+      playChimeFreq(intensity, MOON_TABLE[moonRowIndex][0], 4.0);
+    } else if(USE_CHIMES){
+      playSurface('bar', intensity);
+    } else {
+      playKnock(intensity);
+    }
   }
   bumpers.forEach((b, i) => {
     if(nowBumperContact[i] && !wasBumperContact[i]){
