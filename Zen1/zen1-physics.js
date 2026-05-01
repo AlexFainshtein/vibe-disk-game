@@ -2,10 +2,10 @@ import { canvas, params, renderExtras } from '../state.js';
 import { disk, bar } from '../playfield.js';
 import { playKnock, playChime, playChimeFreq } from '../sound.js';
 import { tickTargets } from './zen1-targets.js';
-import { tickBumper, bumpers, notifyBumperHit, setOnBumperGrabbed } from './zen1-bumper.js';
+import { tickBumper, bumpers, notifyBumperHit, setOnBumperGrabbed, MIN_RADIUS_FRAC, MAX_RADIUS_FRAC } from './zen1-bumper.js';
 import { tickTrail, pauseTrail, resetTrail, cycleTrailColor, getTrailColorMode, notifyContact, addContactPoint } from './zen1-trail.js';
 import { initPause, clearPause } from './zen1-pause.js';
-import { setBarDownSound } from './zen1-bar.js';
+import { setBarDownSound, snapAngle } from './zen1-bar.js';
 
 window.ZEN1_VERSION = 'planck-1';
 
@@ -72,7 +72,7 @@ const MOON_TABLE_RAW = [
   [46.25, 185.00, 233.08, 277.18, 2], // m28
   [61.74, 146.83, 185.00, 246.94, 4], // m29
   [61.74, 1, 1, 1, 4], // m30? 0
-  [69.30, 1, 1, 1, 4], // m30? 0
+  //[69.30, 1, 1, 1, 4], // m30? 0
 
   /*
   // Memo to Claude: don't erase this commented-out table!
@@ -147,6 +147,120 @@ moonBtn?.addEventListener('click', () => {
 });
 colorBtn?.addEventListener('click', () => { cycleTrailColor(); updateButtonLabels(); });
 updateButtonLabels();
+
+function randomizeBumpers(){
+  const shortSide = Math.min(canvas.width, canvas.height);
+  const minR = shortSide * MIN_RADIUS_FRAC;
+  const maxR = shortSide * MAX_RADIUS_FRAC;
+  const MIN_WALL_CLEAR = 3 * disk.r;
+  const MIN_BUMPER_GAP = 3 * disk.r;
+
+  const dp = diskBody.getPosition();
+  const diskX = toPx(dp.x), diskY = toPx(dp.y);
+
+  const MAX_ATTEMPTS = 10000;
+  for(let attempt = 0; attempt < MAX_ATTEMPTS; attempt++){
+    const candidates = bumpers.map(() => {
+      const r = minR + Math.random() * (maxR - minR);
+      const x = r + Math.random() * (canvas.width  - 2 * r);
+      const y = r + Math.random() * (canvas.height - 2 * r);
+      return { r, x, y };
+    });
+
+    // Each bumper edge is at least MIN_WALL_CLEAR from at least one of left/right walls
+    const wallOk = candidates.every(b =>
+      Math.max(b.x - b.r, canvas.width - (b.x + b.r)) >= MIN_WALL_CLEAR
+    );
+    if(!wallOk) continue;
+
+    // Edge-to-edge gap between every bumper pair >= MIN_BUMPER_GAP
+    let pairOk = true;
+    for(let i = 0; i < candidates.length && pairOk; i++)
+      for(let j = i + 1; j < candidates.length && pairOk; j++){
+        const c1 = candidates[i], c2 = candidates[j];
+        if(Math.hypot(c1.x - c2.x, c1.y - c2.y) - c1.r - c2.r < MIN_BUMPER_GAP) pairOk = false;
+      }
+    if(!pairOk) continue;
+
+    // No bumper intersects the disk
+    const diskOk = candidates.every(b =>
+      Math.hypot(b.x - diskX, b.y - diskY) >= b.r + disk.r
+    );
+    if(!diskOk) continue;
+
+    candidates.forEach((c, i) => { bumpers[i].x = c.x; bumpers[i].y = c.y; bumpers[i].r = c.r; });
+    resetTrail();
+    return;
+  }
+}
+
+function barVisibleArea(y1, y2){
+  const h = bar.height, H = canvas.height, W = canvas.width;
+  const slope = y2 - y1;
+
+  // x values where the top or bottom edge crosses y=0 or y=H
+  const xs = [0, W];
+  if(slope !== 0){
+    const add = x => { if(x > 0 && x < W) xs.push(x); };
+    add(-y1 * W / slope);            // top edge crosses y=0
+    add((H - y1) * W / slope);       // top edge crosses y=H
+    add((-y1 - h) * W / slope);      // bottom edge crosses y=0
+    add((H - y1 - h) * W / slope);   // bottom edge crosses y=H
+  }
+  xs.sort((a, b) => a - b);
+
+  // visH is piecewise-linear between these breakpoints — trapezoid rule is exact per segment
+  const visH = x => {
+    const top = y1 + slope * x / W;
+    return Math.max(0, Math.min(top + h, H) - Math.max(top, 0));
+  };
+  let area = 0;
+  for(let i = 0; i < xs.length - 1; i++)
+    area += (xs[i + 1] - xs[i]) * (visH(xs[i]) + visH(xs[i + 1])) / 2;
+  return area;
+}
+
+function randomizeBar(){
+  const dp    = diskBody.getPosition();
+  const diskX = toPx(dp.x), diskY = toPx(dp.y);
+
+  const MAX_ATTEMPTS = 10000;
+  for(let attempt = 0; attempt < MAX_ATTEMPTS; attempt++){
+    // Pick a random raw angle in [-PI/3, PI/3] and snap to the nearest valid 360/N angle.
+    const rawAngle = (Math.random() * 2 - 1) * Math.PI / 3;
+    const angle    = snapAngle(rawAngle);
+    const dy       = canvas.width * Math.tan(angle);  // y2 - y1
+
+    // Pick a random midpoint y — wide range, visibility checked below.
+    const absDy = Math.abs(dy);
+    const yMin  = -absDy / 2 - bar.height;
+    const yMax  = canvas.height + absDy / 2;
+    const yMid  = yMin + Math.random() * (yMax - yMin);
+
+    const y1 = yMid - dy / 2;
+    const y2 = yMid + dy / 2;
+
+    // At least half the bar's area must be visible on screen (exact analytical check).
+    if(barVisibleArea(y1, y2) < 0.5 * canvas.width * bar.height) continue;
+
+    // Bar top at the disk's x must be below the disk's bottom edge.
+    const barTopAtDisk = y1 + (y2 - y1) * (diskX / canvas.width);
+    if(barTopAtDisk < diskY + disk.r) continue;
+
+    bar.y1 = y1;
+    bar.y2 = y2;
+    bar.y  = Math.min(y1, y2);
+    bar.prevY1 = null;
+    bar.prevY2 = null;
+    return;
+  }
+}
+
+document.getElementById('randomBtn')?.addEventListener('pointerdown', (e) => e.stopPropagation());
+document.getElementById('randomBtn')?.addEventListener('click', () => {
+  randomizeBumpers();
+  randomizeBar();
+});
 document.getElementById('resetDisk')?.addEventListener('click', () => {
   diskBody.setPosition(Vec2(toM(canvas.width / 2), toM(canvas.height / 2)));
   diskBody.setLinearVelocity(Vec2(0, 0));
@@ -180,7 +294,9 @@ document.getElementById('speedDown')?.addEventListener('click', () => adjustSpee
 
 const uiHint = document.getElementById('ui');
 if(uiHint){
-  canvas.addEventListener('pointerdown', () => uiHint.classList.add('hidden'), { once: true });
+  const hideHint = () => uiHint.classList.add('hidden');
+  canvas.addEventListener('pointerdown', hideHint, { once: true });
+  document.getElementById('speedUp')?.addEventListener('click', hideHint, { once: true });
 }
 
 // ─── Physics constants ────────────────────────────────────────────────────────

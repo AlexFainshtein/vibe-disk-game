@@ -21,8 +21,8 @@ function defaultPositions(){
 const RESIZE_BLOCK_MS      = 150;   // ignore curvature for this long after grab
 const RESIZE_AREA_THRESH   = 800;   // signed-area threshold to enter resize mode
 const RESIZE_RATE          = 6;     // radius px change per unit of normalized area
-const MIN_RADIUS_FRAC      = 1/20;  // smallest bumper as fraction of short canvas side
-const MAX_RADIUS_FRAC      = 1;     // largest bumper as fraction of short canvas side
+export const MIN_RADIUS_FRAC = 1/20;  // smallest bumper as fraction of short canvas side
+export const MAX_RADIUS_FRAC = 1;     // largest bumper as fraction of short canvas side
 const TRAIL_DURATION_MS    = 250;   // how long trail points are kept (like WhirlZoomMap)
 
 const BUMPER_DEFS = [

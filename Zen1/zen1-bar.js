@@ -44,7 +44,7 @@ const HANDLE_VIS = 10;  // px width of the visible indicator strip
 // No precomputed list, no artificial limit — covers all N up to infinity (horizontal).
 const MIN_SNAP_ANGLE = 1 * Math.PI / 180; // below 1°, snap to horizontal
 
-function snapAngle(theta){
+export function snapAngle(theta){
   const sign = theta >= 0 ? 1 : -1;
   const abs  = Math.abs(theta);
   if(abs < MIN_SNAP_ANGLE) return 0;
