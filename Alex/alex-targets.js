@@ -1,6 +1,6 @@
-import { canvas, renderExtras } from './state.js';
-import { disk, bar } from './playfield.js';
-import { playChime } from './sound.js';
+import { canvas, renderExtras } from '../state.js';
+import { disk, bar } from '../playfield.js';
+import { playChime } from '../sound.js';
 
 const NUM_TARGETS = 5;
 const TARGET_RADIUS = 24;

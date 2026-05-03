@@ -1,8 +1,8 @@
-import { canvas, inputHooks } from './state.js';
-import { disk, bar, anchor, setDiskRadiusFraction } from './playfield.js';
+import { canvas, inputHooks } from '../state.js';
+import { disk, bar, anchor, setDiskRadiusFraction } from '../playfield.js';
 import { bricks, initBricks, bubblePop } from './eugene-bricks.js';
 import { mallet, tickMallet } from './eugene-mallet.js';
-import { playKnock, playFanfare, playDing, playShatter } from './sound.js';
+import { playKnock, playFanfare, playDing, playShatter } from '../sound.js';
 import './eugene-handedness.js';
 import {
   DISK_RADIUS_FRACTION,

@@ -1,30 +1,25 @@
 @echo off
 del /q public\* 2>nul
+if exist public\Alex rmdir /s /q public\Alex
+if exist public\Eugene rmdir /s /q public\Eugene
+if exist public\Zen1 rmdir /s /q public\Zen1
 copy index.html public\
-copy alex.html public\
-copy eugene.html public\
 copy main.js public\
 copy state.js public\
 copy playfield.js public\
-copy alex-physics.js public\
-copy alex-targets.js public\
-copy alex-bumper.js public\
-copy alex-trail.js public\
-copy alex-pause.js public\
 copy og-preview.png public\
 copy controller-spring-drag.js public\
-copy eugene-physics.js public\
-copy eugene-bricks.js public\
-copy eugene-mallet.js public\
-copy eugene-handedness.js public\
-copy eugene-config.js public\
 copy render.js public\
 copy input.js public\
 copy sound.js public\
 copy controls.js public\
 copy style.css public\
-if not exist public\Zen1 mkdir public\Zen1
-for %%f in (zen1\*) do copy /y %%f public\Zen1\
+mkdir public\Alex
+for %%f in (Alex\*) do copy /y %%f public\Alex\
+mkdir public\Eugene
+for %%f in (Eugene\*) do copy /y %%f public\Eugene\
+mkdir public\Zen1
+for %%f in (Zen1\*) do copy /y %%f public\Zen1\
 if "%1"=="" (
   firebase deploy
 ) else (

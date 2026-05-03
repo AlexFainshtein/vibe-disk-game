@@ -1,5 +1,5 @@
-import { canvas, renderExtras, inputHooks } from './state.js';
-import { disk } from './playfield.js';
+import { canvas, renderExtras, inputHooks } from '../state.js';
+import { disk } from '../playfield.js';
 
 // Bumper radius is a fraction of the shorter canvas dimension so it stays right-sized across phones / orientations.
 const BUMPER_RADIUS_FRACTION = 1/6;

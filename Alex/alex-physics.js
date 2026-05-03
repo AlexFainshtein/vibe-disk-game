@@ -1,11 +1,11 @@
-import { canvas, params, renderOverlays } from './state.js';
-import { disk, bar, anchor } from './playfield.js';
-import { playKnock, playChime } from './sound.js';
+import { canvas, params, renderOverlays } from '../state.js';
+import { disk, bar, anchor } from '../playfield.js';
+import { playKnock, playChime } from '../sound.js';
 import { tickTargets } from './alex-targets.js';
 import { tickBumper, bumper, notifyBumperHit } from './alex-bumper.js';
 import { tickTrail, pauseTrail, resetTrail, setTrailColor, resetTrailColor, trailHasContent } from './alex-trail.js';
 import { clearPause, negatePausedVelocity, getPausedSpeed, scalePausedVelocity } from './alex-pause.js';
-import { createSpringDragController } from './controller-spring-drag.js';
+import { createSpringDragController } from '../controller-spring-drag.js';
 
 // Alex-specific color palette (overrides the warm defaults in playfield.js).
 // Background gradient is set in state.js (screen.backgrounds.alex).

@@ -1,5 +1,5 @@
-import { canvas, renderExtras } from './state.js';
-import { disk } from './playfield.js';
+import { canvas, renderExtras } from '../state.js';
+import { disk } from '../playfield.js';
 
 // Eugene-only feature: a wall of breakable bricks at the top, plus the bubble-pop
 // animation that fires when the disk's "glass" mode pops against a brick. bubblePop

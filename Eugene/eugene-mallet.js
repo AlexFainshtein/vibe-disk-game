@@ -1,6 +1,6 @@
-import { canvas, renderExtras, inputHooks } from './state.js';
-import { disk } from './playfield.js';
-import { playKnock, playGulp } from './sound.js';
+import { canvas, renderExtras, inputHooks } from '../state.js';
+import { disk } from '../playfield.js';
+import { playKnock, playGulp } from '../sound.js';
 import { isLeftHanded } from './eugene-handedness.js';
 import {
   MALLET_RADIUS_FRACTION, MALLET_CENTER_OFFSET, MALLET_INNER_RESTITUTION,
