@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8" />
+<style>
+body {
+margin: 0;
+overflow: hidden;
+background: #111;
+touch-action: none;
+}
+
+.disk {
+position: absolute;
+width: 80px;
+height: 80px;
+border-radius: 50%;
+cursor: grab;
+}
+</style>
+</head>
+<body>
+
+<script>
+const R = 40;
+const D = 80;
+const bounce = 0.95;
+const disks = [];
+
+let audioCtx = null;
+
+function ensureAudio() {
+if (!audioCtx) {
+const Ctx = window.AudioContext || window.webkitAudioContext;
+if (Ctx) audioCtx = new Ctx();
+}
+if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+}
+
+function beep(freq, duration, type = "sine") {
+if (!audioCtx) return;
+
+const osc = audioCtx.createOscillator();
+const gain = audioCtx.createGain();
+
+osc.type = type;
+osc.frequency.value = freq;
+gain.gain.value = 0.08;
+
+osc.connect(gain);
+gain.connect(audioCtx.destination);
+
+osc.start();
+gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+osc.stop(audioCtx.currentTime + duration);
+}
+
+function median(values) {
+const s = [...values].sort((a, b) => a - b);
+return s[Math.floor(s.length / 2)];
+}
+
+function launcherY() {
+return window.innerHeight - window.innerHeight / 10 - D - 20;
+}
+
+function makeLaunchPair() {
+const centerX = window.innerWidth / 2 - R;
+const rightX = centerX + D + 25;
+const y = launcherY();
+
+makeDisk(centerX, y, "#1e90ff", true);
+makeDisk(rightX, y, "#ff9800", true);
+}
+
+function makeDisk(x, y, color, isLauncher) {
+const el = document.createElement("div");
+el.className = "disk";
+el.style.background = color;
+document.body.appendChild(el);
+
+const d = {
+el,
+x,
+y,
+vx: 0,
+vy: 0,
+dragging: false,
+hasMoved: false,
+isLauncher,
+vHistory: [],
+lastTime: performance.now()
+};
+
+disks.push(d);
+setPos(d);
+attachDrag(d);
+}
+
+function setPos(d) {
+d.el.style.left = d.x + "px";
+d.el.style.top = d.y + "px";
+}
+
+function attachDrag(d) {
+d.el.addEventListener("pointerdown", e => {
+ensureAudio();
+
+d.dragging = true;
+d.el.setPointerCapture(e.pointerId);
+
+d.offsetX = e.clientX - d.x;
+d.offsetY = e.clientY - d.y;
+
+d.vHistory = [];
+d.lastTime = performance.now();
+});
+
+d.el.addEventListener("pointermove", e => {
+if (!d.dragging) return;
+
+const now = performance.now();
+const dt = Math.max(1, now - d.lastTime);
+
+const oldX = d.x;
+const oldY = d.y;
+
+d.x = e.clientX - d.offsetX;
+d.y = e.clientY - d.offsetY;
+
+const vx = (d.x - oldX) / dt * 16.67;
+const vy = (d.y - oldY) / dt * 16.67;
+
+d.vHistory.push({ vx, vy });
+if (d.vHistory.length > 3) d.vHistory.shift();
+
+if (Math.hypot(d.x - oldX, d.y - oldY) > 1) {
+d.hasMoved = true;
+}
+
+d.lastTime = now;
+setPos(d);
+});
+
+d.el.addEventListener("pointerup", e => {
+d.dragging = false;
+d.el.releasePointerCapture(e.pointerId);
+
+if (d.vHistory.length > 0) {
+d.vx = median(d.vHistory.map(v => v.vx));
+d.vy = median(d.vHistory.map(v => v.vy));
+}
+
+if (d.isLauncher && d.hasMoved) {
+d.isLauncher = false;
+makeLaunchPair();
+}
+});
+}
+
+function collide(a, b) {
+const ax = a.x + R;
+const ay = a.y + R;
+const bx = b.x + R;
+const by = b.y + R;
+
+const dx = bx - ax;
+const dy = by - ay;
+const dist = Math.hypot(dx, dy);
+
+if (dist >= D || dist === 0) return;
+
+const nx = dx / dist;
+const ny = dy / dist;
+
+const relVx = b.vx - a.vx;
+const relVy = b.vy - a.vy;
+const closingSpeed = relVx * nx + relVy * ny;
+
+if (closingSpeed > 0) return;
+
+const impulse = -closingSpeed * 0.9;
+
+a.vx -= impulse * nx;
+a.vy -= impulse * ny;
+b.vx += impulse * nx;
+b.vy += impulse * ny;
+
+const overlap = D - dist;
+a.x -= nx * overlap / 2;
+a.y -= ny * overlap / 2;
+b.x += nx * overlap / 2;
+b.y += ny * overlap / 2;
+
+beep(220, 0.08, "square");
+}
+
+function animate() {
+for (const d of disks) {
+if (!d.dragging && !d.isLauncher) {
+d.x += d.vx;
+d.y += d.vy;
+
+if (d.x < 0) {
+d.x = 0;
+d.vx *= -bounce;
+beep(700, 0.05);
+}
+
+if (d.x + D > window.innerWidth) {
+d.x = window.innerWidth - D;
+d.vx *= -bounce;
+beep(700, 0.05);
+}
+}
+}
+
+for (let i = 0; i < disks.length; i++) {
+for (let j = i + 1; j < disks.length; j++) {
+if (disks[i].isLauncher || disks[j].isLauncher) continue;
+collide(disks[i], disks[j]);
+}
+}
+
+for (let i = disks.length - 1; i >= 0; i--) {
+const d = disks[i];
+
+if (d.y + D < 0) {
+d.el.remove();
+disks.splice(i, 1);
+continue;
+}
+
+setPos(d);
+}
+
+requestAnimationFrame(animate);
+}
+
+makeLaunchPair();
+animate();
+</script>
+
+</body>
+</html>

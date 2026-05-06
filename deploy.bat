@@ -1,6 +1,7 @@
 @echo off
 del /q public\* 2>nul
 if exist public\Alex rmdir /s /q public\Alex
+if exist public\Alex1 rmdir /s /q public\Alex1
 if exist public\Eugene rmdir /s /q public\Eugene
 if exist public\Zen1 rmdir /s /q public\Zen1
 copy index.html public\
@@ -16,6 +17,8 @@ copy controls.js public\
 copy style.css public\
 mkdir public\Alex
 for %%f in (Alex\*) do copy /y %%f public\Alex\
+mkdir public\Alex1
+for %%f in (Alex1\*) do copy /y %%f public\Alex1\
 mkdir public\Eugene
 for %%f in (Eugene\*) do copy /y %%f public\Eugene\
 mkdir public\Zen1

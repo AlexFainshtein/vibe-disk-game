@@ -8,7 +8,12 @@ import { initControls } from './controls.js';
 // fetched and executed. Top-level await is supported in all modern browsers and
 // keeps the rest of this file linear.
 const player = document.body.dataset.player ?? 'alex';
-const physicsModule = await import(player === 'eugene' ? './Eugene/eugene-physics.js' : './Alex/alex-physics.js');
+const physicsPaths = {
+  alex:   './Alex/alex-physics.js',
+  alex1:  './Alex1/alex1-physics.js',
+  eugene: './Eugene/eugene-physics.js',
+};
+const physicsModule = await import(physicsPaths[player] ?? physicsPaths.alex);
 const update = physicsModule.update;
 
 let lastTime = performance.now();
