@@ -79,7 +79,9 @@ Both recompute on window resize. Variant-specific size constants (e.g. Alex's `B
 
 ## Deploying
 
-Run `deploy.bat` to copy source files to `public/` and deploy to Firebase Hosting. When adding new source files, add a corresponding `copy` line in `deploy.bat`.
+Run `deploy.bat` (Windows) or `./deploy.sh` (Linux/macOS) to copy source files to `public/` and deploy to Firebase Hosting. With no argument, both scripts run `firebase deploy` against the active Firebase project (Alex's); pass a project alias as the first argument (e.g. `deploy.bat eugene` or `./deploy.sh eugene`) to deploy to a different project (Eugene's).
+
+**Keep `deploy.bat` and `deploy.sh` in sync.** They are parallel implementations — when adding/removing/renaming source files, update the copy list in BOTH scripts in the same change.
 
 ## Notes
 
