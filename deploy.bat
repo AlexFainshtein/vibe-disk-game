@@ -1,4 +1,5 @@
 @echo off
+if not exist public mkdir public
 del /q public\* 2>nul
 if exist public\Alex rmdir /s /q public\Alex
 if exist public\Alex1 rmdir /s /q public\Alex1
