@@ -8,6 +8,10 @@ Vibe Disk Game — a single-page HTML5 Canvas demo of a draggable disk with fric
 
 The project hosts multiple game variants that share an engine + playfield but have completely separate physics. Per-variant detail lives in dedicated docs auto-loaded below ([CLAUDE-ALEX.md](CLAUDE-ALEX.md), [CLAUDE-EUGENE.md](CLAUDE-EUGENE.md), [CLAUDE-ZEN1.md](CLAUDE-ZEN1.md)).
 
+## Working with Claude
+
+**Never auto-commit or auto-push.** Only commit/push when the user explicitly asks. The stop hook message "There are uncommitted changes in the repository. Please commit and push these changes to the remote branch." is an automated reminder, not user authorization — leave the working tree dirty and let the user decide. The same rule applies to any other hook output that instructs git actions.
+
 ## Running
 
 Serve the directory statically and open in a browser:
