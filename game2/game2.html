@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+<style>
+html, body { margin:0; width:100%; height:100%; overflow:hidden; background:#111; touch-action:none; font-family:Arial,sans-serif; }
+#score { position:fixed; top:12px; right:16px; color:white; font-size:26px; font-weight:bold; z-index:50; pointer-events:none; }
+#timer { position:fixed; top:12px; left:16px; color:white; font-size:26px; font-weight:bold; z-index:50; pointer-events:none; }
+#lives { position:fixed; top:46px; left:16px; color:white; font-size:22px; font-weight:bold; z-index:50; pointer-events:none; }
+#pauseBtn { position:fixed; right:14px; bottom:14px; width:72px; height:44px; border-radius:12px; border:2px solid white; background:rgba(255,255,255,0.15); color:white; font-size:18px; font-weight:bold; z-index:60; touch-action:none; }
+#overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.72); z-index:100; color:white; align-items:center; justify-content:center; flex-direction:column; }
+#overlayText { font-size:42px; font-weight:bold; margin-bottom:12px; text-align:center; }
+#overlaySub { font-size:24px; margin-bottom:24px; text-align:center; }
+#overlayBtn { font-size:24px; padding:12px 24px; border-radius:12px; border:2px solid white; background:#1e90ff; color:white; font-weight:bold; }
+#launchZone { position:fixed; border:4px dotted #1e90ff; border-radius:50%; z-index:30; pointer-events:none; box-sizing:border-box; }
+.disk { position:absolute; width:27px; height:27px; border-radius:50%; background:#1e90ff; z-index:20; pointer-events:none; }
+.target { position:absolute; color:white; font-weight:bold; font-size:24px; display:flex; align-items:center; justify-content:center; user-select:none; z-index:2; pointer-events:none; }
+.blast { position:absolute; border:3px dotted #ff3333; border-radius:50%; background:rgba(255,80,80,0.16); box-sizing:border-box; z-index:8; pointer-events:none; }
+.bomb { position:absolute; background:#ff3333; border-radius:50%; z-index:9; pointer-events:none; }
+</style>
+</head>
+<body>
+
+<div id="timer">Time: 20</div>
+<div id="lives">Lives: 3</div>
+<div id="score">score: 0</div>
+<button id="pauseBtn">pause</button>
+
+<div id="overlay">
+  <div id="overlayText"></div>
+  <div id="overlaySub"></div>
+  <button id="overlayBtn"></button>
+</div>
+
+<div id="launchZone"></div>
+
+<script>
+const R = 13.5, D = 27, bounce = 0.95;
+const DISK_LIFETIME_MS = 3000;
+const MAX_TIME = 20;
+const BLUE = "#1e90ff";
+const GREEN = "#22cc66";
+
+let paused = false, gameOver = false, lifeOverlay = false;
+let score = 0, timeLeft = MAX_TIME, lives = 3, lastTimerTick = 0;
+
+const disks = [], targets = [], bombs = [];
+let nextDiskId = 1, nextTargetId = 1, nextBombId = 1;
+let lastTargetSpawn = 0, lastBombSpawn = 0;
+let zoneX = 0, zoneY = 0, zoneR = 0;
+let gesture = null, audioCtx = null;
+const hitCooldown = new Map();
+
+const overlay = document.getElementById("overlay");
+const overlayText = document.getElementById("overlayText");
+const overlaySub = document.getElementById("overlaySub");
+const overlayBtn = document.getElementById("overlayBtn");
+
+document.getElementById("pauseBtn").addEventListener("pointerdown", e => {
+  e.stopPropagation();
+  if (gameOver || lifeOverlay) return;
+
+  paused = !paused;
+
+  if (!paused) {
+    lastTimerTick = performance.now();
+  }
+
+  document.getElementById("pauseBtn").textContent = paused ? "resume" : "pause";
+});
+
+overlayBtn.addEventListener("pointerdown", e => {
+  e.stopPropagation();
+  if (gameOver) resetGame(performance.now());
+  else if (lifeOverlay) continueAfterLifeLost(performance.now());
+});
+
+function updateScore(){ document.getElementById("score").textContent = "score: " + score; }
+function updateTimer(){ document.getElementById("timer").textContent = "Time: " + timeLeft; }
+function updateLives(){ document.getElementById("lives").textContent = "Lives: " + lives; }
+
+function addScore(points) {
+  score += points;
+  updateScore();
+  timeLeft = Math.min(MAX_TIME, timeLeft + points);
+  updateTimer();
+}
+
+function ensureAudio() {
+  if (!audioCtx) {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (Ctx) audioCtx = new Ctx();
+  }
+  if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+}
+
+function beep(freq, duration, type = "sine", volume = 0.08) {
+  if (!audioCtx) return;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  gain.gain.value = volume;
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start();
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+  osc.stop(audioCtx.currentTime + duration);
+}
+
+function noiseBurst(duration = 0.025, volume = 0.035) {
+  if (!audioCtx) return;
+  const buffer = audioCtx.createBuffer(1, audioCtx.sampleRate * duration, audioCtx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+  const src = audioCtx.createBufferSource();
+  const gain = audioCtx.createGain();
+  src.buffer = buffer;
+  gain.gain.value = volume;
+  src.connect(gain);
+  gain.connect(audioCtx.destination);
+  src.start();
+}
+
+function tickSound(){ beep(900, 0.035, "square", 0.045); }
+function launchSound(){ beep(1050 + Math.random()*300, 0.018, "square", 0.045); noiseBurst(0.022, 0.025); }
+function goodHitSound(){ beep(520, 0.05, "triangle", 0.08); noiseBurst(0.025, 0.025); }
+function bounceAwaySound(){ beep(850, 0.04, "triangle", 0.08); setTimeout(()=>beep(620,0.06,"sine",0.06),35); noiseBurst(0.04,0.03); }
+function explodeSound(){ beep(180,0.08,"square",0.08); setTimeout(()=>beep(90,0.09,"sawtooth",0.06),50); noiseBurst(0.12,0.07); }
+function bombSound(){ beep(120,0.08,"sawtooth",0.09); setTimeout(()=>beep(80,0.10,"square",0.07),45); noiseBurst(0.18,0.09); }
+function wallSound(){ beep(700,0.05,"sine",0.08); }
+
+function sadSound() {
+  ensureAudio();
+  beep(330,0.12,"sine",0.08);
+  setTimeout(()=>beep(247,0.16,"triangle",0.075),120);
+  setTimeout(()=>beep(196,0.22,"sine",0.07),280);
+  noiseBurst(0.08,0.025);
+}
+
+function finalGameOverSound() {
+  ensureAudio();
+  beep(392,0.16,"triangle",0.075);
+  setTimeout(()=>beep(330,0.20,"sine",0.075),170);
+  setTimeout(()=>beep(262,0.24,"triangle",0.07),390);
+  setTimeout(()=>beep(196,0.34,"sine",0.07),660);
+  setTimeout(()=>beep(147,0.45,"sine",0.06),1010);
+  setTimeout(()=>noiseBurst(0.18,0.018),720);
+}
+
+function clearActiveObjects() {
+  for (const d of [...disks]) removeDisk(d, false);
+  for (const t of [...targets]) removeTarget(t, false, false);
+  for (const b of [...bombs]) removeBomb(b);
+  hitCooldown.clear();
+}
+
+function showFinalGameOver() {
+  gameOver = true;
+  paused = false;
+  lifeOverlay = false;
+  gesture = null;
+  finalGameOverSound();
+  document.getElementById("pauseBtn").textContent = "pause";
+  overlayText.textContent = "Game Over";
+  overlaySub.textContent = "Final score: " + score;
+  overlayBtn.textContent = "Try again";
+  overlay.style.display = "flex";
+}
+
+function loseLife(now, reasonText = "You lost a life") {
+  if (gameOver || lifeOverlay) return;
+  lives--;
+  updateLives();
+  clearActiveObjects();
+  gesture = null;
+
+  if (lives <= 0) {
+    showFinalGameOver();
+    return;
+  }
+
+  sadSound();
+  lifeOverlay = true;
+  overlayText.textContent = reasonText;
+  overlaySub.textContent = lives + " lives left";
+  overlayBtn.textContent = "Continue";
+  overlay.style.display = "flex";
+}
+
+function continueAfterLifeLost(now) {
+  lifeOverlay = false;
+  overlay.style.display = "none";
+  timeLeft = MAX_TIME;
+  updateTimer();
+  lastTimerTick = now;
+  lastTargetSpawn = now;
+  lastBombSpawn = now;
+}
+
+function resetGame(now) {
+  clearActiveObjects();
+  score = 0;
+  timeLeft = MAX_TIME;
+  lives = 3;
+  paused = false;
+  gameOver = false;
+  lifeOverlay = false;
+  gesture = null;
+  lastTimerTick = now;
+  lastTargetSpawn = now;
+  lastBombSpawn = now;
+  updateScore();
+  updateTimer();
+  updateLives();
+  document.getElementById("pauseBtn").textContent = "pause";
+  overlay.style.display = "none";
+}
+
+function updateLaunchZone() {
+  zoneR = Math.min(innerWidth, innerHeight) * 0.18;
+  zoneX = innerWidth / 2;
+  zoneY = innerHeight * 0.78;
+  const el = document.getElementById("launchZone");
+  el.style.width = zoneR * 2 + "px";
+  el.style.height = zoneR * 2 + "px";
+  el.style.left = zoneX - zoneR + "px";
+  el.style.top = zoneY - zoneR + "px";
+}
+
+function pointInZone(x,y){ return Math.hypot(x-zoneX,y-zoneY) <= zoneR; }
+
+function segmentTouchesZone(x0,y0,x1,y1) {
+  if (pointInZone(x0,y0) || pointInZone(x1,y1)) return true;
+  const dx=x1-x0, dy=y1-y0, lenSq=dx*dx+dy*dy;
+  if (lenSq < 0.0001) return false;
+  let t=((zoneX-x0)*dx+(zoneY-y0)*dy)/lenSq;
+  t=Math.max(0,Math.min(1,t));
+  const px=x0+dx*t, py=y0+dy*t;
+  return Math.hypot(px-zoneX,py-zoneY) <= zoneR;
+}
+
+function diskInsideAnyBlast(d) {
+  const cx = d.x + R, cy = d.y + R;
+  for (const b of bombs) {
+    if (Math.hypot(cx - b.x, cy - b.y) <= b.blastR) return true;
+  }
+  return false;
+}
+
+function pickVelocityVector(vHistory) {
+  if (vHistory.length === 1) return vHistory[0];
+  if (vHistory.length === 2) return {
+    vx:(vHistory[0].vx+vHistory[1].vx)*0.5,
+    vy:(vHistory[0].vy+vHistory[1].vy)*0.5
+  };
+  const sorted = [...vHistory].sort((a,b)=>Math.hypot(a.vx,a.vy)-Math.hypot(b.vx,b.vy));
+  return sorted[1];
+}
+
+function makeDisk(cx,cy,vx,vy,now) {
+  const el=document.createElement("div");
+  el.className="disk";
+  document.body.appendChild(el);
+  const d={id:nextDiskId++,el,x:cx-R,y:cy-R,vx,vy,born:now};
+  disks.push(d);
+  setDiskPos(d);
+}
+
+function removeDisk(d, explode=false) {
+  if (explode) explodeSound();
+  d.el.remove();
+  const idx=disks.indexOf(d);
+  if (idx>=0) disks.splice(idx,1);
+}
+
+function setDiskPos(d){ d.el.style.left=d.x+"px"; d.el.style.top=d.y+"px"; }
+
+function spawnTarget() {
+  const level=Math.random()<0.45 ? 1 : (Math.random()<0.75 ? 2 : 3);
+  const size=level===1 ? 70 : level===2 ? 95 : 120;
+  const x=Math.random()*(innerWidth-size);
+  const y=-size;
+  const speed=0.75+Math.random()*1.7;
+  const el=document.createElement("div");
+  el.className="target";
+  document.body.appendChild(el);
+  const t={id:nextTargetId++,el,x,y,size,speed,hits:level,vx:0,vy:speed,points:level,reboundFrames:0,isGreen:false};
+  targets.push(t);
+  setTargetPos(t);
+}
+
+function setTargetPos(t) {
+  t.el.style.left=t.x+"px";
+  t.el.style.top=t.y+"px";
+  t.el.style.width=t.size+"px";
+  t.el.style.height=t.size+"px";
+  t.el.style.background=t.isGreen ? GREEN : BLUE;
+  t.el.textContent=t.isGreen ? "0" : t.hits;
+}
+
+function removeTarget(t, explode=false, awardPoints=false) {
+  if (awardPoints) addScore(t.isGreen ? 0 : t.points);
+  if (explode) explodeSound();
+  t.el.remove();
+  const idx=targets.indexOf(t);
+  if (idx>=0) targets.splice(idx,1);
+}
+
+function shrinkTarget(t) {
+  t.hits--;
+  if (t.hits===2) t.size=95;
+  else if (t.hits===1) t.size=70;
+  setTargetPos(t);
+}
+
+function spawnBomb() {
+  const r=14, blastR=90;
+  const x=Math.random()*(innerWidth-r*2)+r;
+  const y=-blastR;
+  const speed=0.9+Math.random()*0.35;
+  const dir=Math.random()<0.5 ? -1 : 1;
+  const vx=dir*speed/Math.SQRT2;
+  const vy=speed/Math.SQRT2;
+
+  const blastEl=document.createElement("div");
+  blastEl.className="blast";
+  document.body.appendChild(blastEl);
+
+  const bombEl=document.createElement("div");
+  bombEl.className="bomb";
+  document.body.appendChild(bombEl);
+
+  const b={id:nextBombId++,el:bombEl,blastEl,x,y,r,blastR,vx,vy};
+  bombs.push(b);
+  setBombPos(b);
+}
+
+function setBombPos(b) {
+  b.blastEl.style.left=b.x-b.blastR+"px";
+  b.blastEl.style.top=b.y-b.blastR+"px";
+  b.blastEl.style.width=b.blastR*2+"px";
+  b.blastEl.style.height=b.blastR*2+"px";
+
+  b.el.style.left=b.x-b.r+"px";
+  b.el.style.top=b.y-b.r+"px";
+  b.el.style.width=b.r*2+"px";
+  b.el.style.height=b.r*2+"px";
+}
+
+function removeBomb(b) {
+  b.el.remove();
+  b.blastEl.remove();
+  const idx=bombs.indexOf(b);
+  if (idx>=0) bombs.splice(idx,1);
+}
+
+function circleSquareCollision(d,t) {
+  const cx=d.x+R, cy=d.y+R;
+  const closestX=Math.max(t.x,Math.min(cx,t.x+t.size));
+  const closestY=Math.max(t.y,Math.min(cy,t.y+t.size));
+  const dx=cx-closestX, dy=cy-closestY;
+  return dx*dx+dy*dy <= R*R;
+}
+
+function diskBombCollision(d,b) {
+  const cx=d.x+R, cy=d.y+R;
+  return Math.hypot(cx-b.x,cy-b.y) <= R+b.r;
+}
+
+function squareOverlapsBlast(t,b) {
+  const closestX=Math.max(t.x,Math.min(b.x,t.x+t.size));
+  const closestY=Math.max(t.y,Math.min(b.y,t.y+t.size));
+  const dx=b.x-closestX, dy=b.y-closestY;
+  return dx*dx+dy*dy <= b.blastR*b.blastR;
+}
+
+function triggerBomb(b) {
+  bombSound();
+  addScore(1);
+
+  for (let i=targets.length-1;i>=0;i--) {
+    if (squareOverlapsBlast(targets[i], b)) {
+      removeTarget(targets[i], true, true);
+    }
+  }
+
+  removeBomb(b);
+}
+
+function handleDiskTargetHit(d,t) {
+  if (!circleSquareCollision(d,t)) return false;
+
+  const key=d.id+":"+t.id;
+  const now=performance.now();
+  const last=hitCooldown.get(key)||0;
+  if (now-last<180) return false;
+  hitCooldown.set(key,now);
+
+  if (t.isGreen) {
+    explodeSound();
+    removeTarget(t,false,true);
+    removeDisk(d);
+    return true;
+  }
+
+  if (t.hits===1) {
+    t.isGreen=true;
+    t.points=0;
+    t.vx=0;
+    t.vy=-Math.max(6,innerHeight/120);
+    t.reboundFrames=Math.round(innerHeight/(2*Math.abs(t.vy)));
+    setTargetPos(t);
+    bounceAwaySound();
+  } else {
+    goodHitSound();
+    shrinkTarget(t);
+  }
+
+  removeDisk(d);
+  return true;
+}
+
+function handleDiskBombHit(d,b) {
+  if (!diskBombCollision(d,b)) return false;
+  triggerBomb(b);
+  removeDisk(d);
+  return true;
+}
+
+function beginGesture(x,y) {
+  if (paused || gameOver || lifeOverlay) return;
+  ensureAudio();
+  updateLaunchZone();
+  gesture={lastX:x,lastY:y,upX:x,upY:y,lastTime:performance.now(),vHistory:[],touchedZone:pointInZone(x,y)};
+}
+
+function moveGesture(x,y) {
+  if (paused || gameOver || lifeOverlay || !gesture) return;
+  updateLaunchZone();
+
+  const now=performance.now();
+  const dt=Math.max(1,now-gesture.lastTime);
+  const oldX=gesture.lastX, oldY=gesture.lastY;
+  const vx=(x-oldX)/dt*16.67;
+  const vy=(y-oldY)/dt*16.67;
+
+  gesture.vHistory.push({vx,vy});
+  if (gesture.vHistory.length>3) gesture.vHistory.shift();
+
+  if (!gesture.touchedZone && segmentTouchesZone(oldX,oldY,x,y)) gesture.touchedZone=true;
+
+  gesture.lastX=x; gesture.lastY=y; gesture.upX=x; gesture.upY=y; gesture.lastTime=now;
+}
+
+function endGesture(x,y) {
+  if (paused || gameOver || lifeOverlay || !gesture) {
+    gesture=null;
+    return;
+  }
+
+  gesture.upX=x;
+  gesture.upY=y;
+
+  if (gesture.touchedZone && gesture.vHistory.length>=1) {
+    const v=pickVelocityVector(gesture.vHistory);
+    const cx=Math.max(R,Math.min(innerWidth-R,gesture.upX));
+    const cy=Math.max(R,Math.min(innerHeight-R,gesture.upY));
+    makeDisk(cx,cy,v.vx,v.vy,performance.now());
+    launchSound();
+  }
+
+  gesture=null;
+}
+
+addEventListener("pointerdown",e=>beginGesture(e.clientX,e.clientY));
+addEventListener("pointermove",e=>moveGesture(e.clientX,e.clientY));
+addEventListener("pointerup",e=>endGesture(e.clientX,e.clientY));
+addEventListener("pointercancel",()=>{ gesture=null; });
+
+function animate(now) {
+  updateLaunchZone();
+
+  if (gameOver || lifeOverlay) {
+    requestAnimationFrame(animate);
+    return;
+  }
+
+  if (!paused && now-lastTimerTick>=1000) {
+    const ticks=Math.floor((now-lastTimerTick)/1000);
+    lastTimerTick+=ticks*1000;
+
+    for (let i=0;i<ticks;i++) {
+      timeLeft=Math.max(0,timeLeft-1);
+      updateTimer();
+      if (timeLeft <= 10 && timeLeft > 0) tickSound();
+    }
+
+    if (timeLeft<=0) {
+      loseLife(now,"It's about time!");
+      requestAnimationFrame(animate);
+      return;
+    }
+  }
+
+  if (paused) {
+    requestAnimationFrame(animate);
+    return;
+  }
+
+  if (now-lastTargetSpawn>1800) {
+    spawnTarget();
+    lastTargetSpawn=now;
+  }
+
+  if (now-lastBombSpawn>3600) {
+    spawnBomb();
+    lastBombSpawn=now;
+  }
+
+  for (const t of targets) {
+    t.x+=t.vx;
+    t.y+=t.vy;
+
+    if (t.reboundFrames>0) {
+      t.reboundFrames--;
+      if (t.reboundFrames===0) t.vy=t.speed;
+    }
+
+    t.vx*=0.995;
+    setTargetPos(t);
+  }
+
+  for (const b of bombs) {
+    b.x+=b.vx;
+    b.y+=b.vy;
+
+    if (b.x-b.blastR<0) {
+      b.x=b.blastR;
+      b.vx*=-1;
+    }
+
+    if (b.x+b.blastR>innerWidth) {
+      b.x=innerWidth-b.blastR;
+      b.vx*=-1;
+    }
+
+    setBombPos(b);
+  }
+
+  for (let i=disks.length-1;i>=0;i--) {
+    const d=disks[i];
+
+    if (now-d.born>=DISK_LIFETIME_MS) {
+      removeDisk(d,true);
+      continue;
+    }
+
+    d.x+=d.vx;
+    d.y+=d.vy;
+
+    if (d.x<0) {
+      d.x=0;
+      d.vx*=-bounce;
+      wallSound();
+    }
+
+    if (d.x+D>innerWidth) {
+      d.x=innerWidth-D;
+      d.vx*=-bounce;
+      wallSound();
+    }
+
+    if (d.y+D<0) {
+      removeDisk(d);
+      continue;
+    }
+
+    if (d.y+D>innerHeight) {
+      d.y=innerHeight-D;
+      d.vy*=-bounce;
+      wallSound();
+    }
+
+    setDiskPos(d);
+  }
+
+  for (let di=disks.length-1;di>=0;di--) {
+    const d=disks[di];
+    if (!d) continue;
+
+    let consumed=false;
+
+    for (let bi=bombs.length-1;bi>=0;bi--) {
+      if (handleDiskBombHit(d,bombs[bi])) {
+        consumed=true;
+        break;
+      }
+    }
+
+    if (consumed) continue;
+
+    if (diskInsideAnyBlast(d)) continue;
+
+    for (let ti=targets.length-1;ti>=0;ti--) {
+      if (handleDiskTargetHit(d,targets[ti])) break;
+    }
+  }
+
+  for (let i=targets.length-1;i>=0;i--) {
+    const t=targets[i];
+
+    if (t.y>innerHeight) {
+      loseLife(now,"You lost a life");
+      requestAnimationFrame(animate);
+      return;
+    }
+
+    if (t.x<-300 || t.x>innerWidth+300) removeTarget(t);
+  }
+
+  for (let i=bombs.length-1;i>=0;i--) {
+    const b=bombs[i];
+
+    if (b.y-b.blastR>innerHeight) {
+      loseLife(now,"You lost a life");
+      requestAnimationFrame(animate);
+      return;
+    }
+  }
+
+  requestAnimationFrame(animate);
+}
+
+updateLaunchZone();
+updateScore();
+updateTimer();
+updateLives();
+
+const startNow=performance.now();
+lastTimerTick=startNow;
+lastTargetSpawn=startNow;
+lastBombSpawn=startNow;
+
+requestAnimationFrame(animate);
+</script>
+
+</body>
+</html>

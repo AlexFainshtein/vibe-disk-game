@@ -5,6 +5,7 @@ if exist public\Alex rmdir /s /q public\Alex
 if exist public\Alex1 rmdir /s /q public\Alex1
 if exist public\Eugene rmdir /s /q public\Eugene
 if exist public\Zen1 rmdir /s /q public\Zen1
+if exist public\game2 rmdir /s /q public\game2
 copy index.html public\
 copy main.js public\
 copy state.js public\
@@ -24,6 +25,8 @@ mkdir public\Eugene
 for %%f in (Eugene\*) do copy /y %%f public\Eugene\
 mkdir public\Zen1
 for %%f in (Zen1\*) do copy /y %%f public\Zen1\
+mkdir public\game2
+for %%f in (game2\*) do copy /y %%f public\game2\
 if "%1"=="" (
   firebase deploy
 ) else (
