@@ -39,6 +39,7 @@ html, body { margin:0; width:100%; height:100%; overflow:hidden; background:#111
 const R = 13.5, D = 27, bounce = 0.95;
 const DISK_LIFETIME_MS = 3000;
 const MAX_TIME = 20;
+const BLAST_R = 90;
 const BLUE = "#1e90ff";
 const GREEN = "#22cc66";
 
@@ -84,6 +85,11 @@ function addScore(points) {
   score += points;
   updateScore();
   timeLeft = Math.min(MAX_TIME, timeLeft + points);
+  updateTimer();
+}
+
+function addTime(seconds) {
+  timeLeft = Math.min(MAX_TIME, timeLeft + seconds);
   updateTimer();
 }
 
@@ -307,7 +313,7 @@ function spawnTarget() {
   const level=Math.random()<0.45 ? 1 : (Math.random()<0.75 ? 2 : 3);
   const size=level===1 ? 70 : level===2 ? 95 : 120;
   const x=Math.random()*(innerWidth-size);
-  const y=-size;
+  const y=-size - 2 * BLAST_R;
   const speed=0.75+Math.random()*1.7;
   const el=document.createElement("div");
   el.className="target";
@@ -327,7 +333,10 @@ function setTargetPos(t) {
 }
 
 function removeTarget(t, explode=false, awardPoints=false) {
-  if (awardPoints) addScore(t.isGreen ? 0 : t.points);
+  if (awardPoints) {
+    if (t.isGreen) addTime(1);
+    else addScore(t.points);
+  }
   if (explode) explodeSound();
   t.el.remove();
   const idx=targets.indexOf(t);
@@ -342,7 +351,7 @@ function shrinkTarget(t) {
 }
 
 function spawnBomb() {
-  const r=14, blastR=90;
+  const r=14, blastR=BLAST_R;
   const x=Math.random()*(innerWidth-r*2)+r;
   const y=-blastR;
   const speed=0.9+Math.random()*0.35;
@@ -597,11 +606,6 @@ function animate(now) {
       d.x=innerWidth-D;
       d.vx*=-bounce;
       wallSound();
-    }
-
-    if (d.y+D<0) {
-      removeDisk(d);
-      continue;
     }
 
     if (d.y+D>innerHeight) {
