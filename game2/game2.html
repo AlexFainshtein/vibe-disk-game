@@ -7,7 +7,25 @@
 html, body { margin:0; width:100%; height:100%; overflow:hidden; background:#111; touch-action:none; font-family:Arial,sans-serif; }
 #score { position:fixed; top:12px; right:16px; color:white; font-size:26px; font-weight:bold; z-index:50; pointer-events:none; }
 #timer { position:fixed; top:12px; left:16px; color:white; font-size:26px; font-weight:bold; z-index:50; pointer-events:none; }
-#lives { position:fixed; top:46px; left:16px; color:white; font-size:22px; font-weight:bold; z-index:50; pointer-events:none; }
+#lives { position:fixed; top:12px; left:50%; transform:translateX(-50%); font-size:30px; font-weight:bold; letter-spacing:2px; z-index:50; pointer-events:none; }
+#lives .heart { display:inline-block; }
+#lives .heart.full { color:#ff5577; }
+#lives .heart.empty { color:rgba(255,85,119,0.25); }
+#lives.hidden { display:none; }
+#level.hidden { display:none; }
+#level { position:fixed; top:46px; right:16px; color:white; font-size:22px; font-weight:bold; z-index:50; pointer-events:none; }
+#levelBanner { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); color:white; font-size:88px; font-weight:bold; letter-spacing:4px; text-shadow:0 0 24px rgba(30,144,255,0.7); z-index:90; pointer-events:none; opacity:0; transition:opacity 0.45s ease; text-align:center; }
+#levelBanner.show { opacity:1; }
+#tapPrompt { position:fixed; font-size:42px; font-weight:bold; color:#1e90ff; letter-spacing:6px; z-index:35; pointer-events:none; transform:translate(-50%,-50%); text-shadow:0 0 12px rgba(30,144,255,0.55); }
+#tapPrompt.hidden { display:none; }
+#rulesPrompt { position:fixed; top:11%; left:50%; transform:translateX(-50%); color:#e6eef6; font-size:15px; line-height:1.4; text-align:left; max-width:96%; width:96%; z-index:36; pointer-events:none; text-shadow:0 0 6px rgba(0,0,0,0.7); padding:0 12px; box-sizing:border-box; }
+#rulesPrompt ul { list-style:disc; padding-left:20px; margin:0; }
+#rulesPrompt li { margin:0 0 5px 0; }
+#rulesPrompt .title { font-weight:bold; font-size:24px; margin:0 0 10px 0; color:#ffffff; text-align:center; }
+#rulesPrompt .ok { color:#7ecfff; font-weight:bold; }
+#rulesPrompt .green { color:#22cc66; font-weight:bold; }
+#rulesPrompt .warn { color:#ff5577; font-weight:bold; }
+#rulesPrompt.hidden { display:none; }
 #pauseBtn { position:fixed; right:14px; bottom:14px; width:72px; height:44px; border-radius:12px; border:2px solid white; background:rgba(255,255,255,0.15); color:white; font-size:18px; font-weight:bold; z-index:60; touch-action:none; }
 #overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.72); z-index:100; color:white; align-items:center; justify-content:center; flex-direction:column; }
 #overlayText { font-size:42px; font-weight:bold; margin-bottom:12px; text-align:center; }
@@ -23,7 +41,9 @@ html, body { margin:0; width:100%; height:100%; overflow:hidden; background:#111
 <body>
 
 <div id="timer">Time: 20</div>
-<div id="lives">Lives: 3</div>
+<div id="lives" class="hidden">♥♥♥</div>
+<div id="level" class="hidden">Level: 1</div>
+<div id="levelBanner"></div>
 <div id="score">score: 0</div>
 <button id="pauseBtn">pause</button>
 
@@ -34,23 +54,49 @@ html, body { margin:0; width:100%; height:100%; overflow:hidden; background:#111
 </div>
 
 <div id="launchZone"></div>
+<div id="tapPrompt">TAP</div>
+<div id="rulesPrompt">
+  <div class="title">How to play:</div>
+  <ul>
+    <li>Fling with your thumb from the <span class="ok">dotted blue launchpad</span> to launch the balls.</li>
+    <li>Score by hitting <span class="warn">BOMBS</span> — each detonation explodes nearby squares for <span class="ok">1, 2, or 3 points</span> each. The bomb itself adds 1 point.</li>
+    <li>Each earned point adds 1 second to the timer.</li>
+    <li>Direct hits on <span class="ok">squares</span> only shrink them (3 → 2 → 1 → 0) — no points awarded.</li>
+    <li>Hitting a <span class="green">zero (green) square</span> upgrades it back to a <span class="ok">"1"</span> and flings it upwards.</li>
+    <li>Don't let any square <span class="warn">reach the bottom</span>.</li>
+    <li>Clear a level for a <span class="ok">+10 point</span> bonus.</li>
+    <li>Note: countdown timer tops out at 20 sec.</li>
+  </ul>
+</div>
 
 <script>
 const R = 13.5, D = 27, bounce = 0.95;
 const DISK_LIFETIME_MS = 3000;
 const MAX_TIME = 20;
 const BLAST_R = 90;
+const WAVE_POINTS = 30;
+const WAVE_PAUSE_MS = 3500;
+const BOMB_SPAWN_INTERVAL_MS = 1800;
+const BOMB_SOFT_CAP = 4;
+const MAX_LIVES = 3;
+const LEVEL_SPEED_PER_LEVEL = 1.07;
+const GAME_SEED = 1;
 const BLUE = "#1e90ff";
 const GREEN = "#22cc66";
 
 let paused = false, gameOver = false, lifeOverlay = false;
-let score = 0, timeLeft = MAX_TIME, lives = 3, lastTimerTick = 0;
+let score = 0, timeLeft = MAX_TIME, lives = MAX_LIVES, lastTimerTick = 0;
+let level = 1;
 
 const disks = [], targets = [], bombs = [];
 let nextDiskId = 1, nextTargetId = 1, nextBombId = 1;
 let lastTargetSpawn = 0, lastBombSpawn = 0;
+let waveBombSide = "left"; // alternates each wave
+let wavePointsSpawned = 0;
+let wavePauseEndTime = 0;
 let zoneX = 0, zoneY = 0, zoneR = 0;
 let gesture = null, audioCtx = null;
+let awaitingStart = true;
 const hitCooldown = new Map();
 
 const overlay = document.getElementById("overlay");
@@ -79,7 +125,39 @@ overlayBtn.addEventListener("pointerdown", e => {
 
 function updateScore(){ document.getElementById("score").textContent = "score: " + score; }
 function updateTimer(){ document.getElementById("timer").textContent = "Time: " + timeLeft; }
-function updateLives(){ document.getElementById("lives").textContent = "Lives: " + lives; }
+function updateLives(){
+  let html = "";
+  for (let i = 0; i < MAX_LIVES; i++) {
+    const cls = i < lives ? "heart full" : "heart empty";
+    html += `<span class="${cls}">♥</span>`;
+  }
+  document.getElementById("lives").innerHTML = html;
+}
+function updateLevel(){ document.getElementById("level").textContent = "Level: " + level; }
+function levelSpeedMultiplier(){ return Math.pow(LEVEL_SPEED_PER_LEVEL, level - 1); }
+
+// Deterministic PRNG (mulberry32). Seeded at game start; each "fresh game"
+// replays the same sequence of spawns. Audio-noise generation deliberately
+// stays on Math.random() since it doesn't affect events.
+let _rngState = 0;
+function seedRandom(seed){ _rngState = (seed >>> 0) || 1; }
+function rng(){
+  _rngState = (_rngState + 0x6D2B79F5) >>> 0;
+  let t = _rngState;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+
+let _bannerTimer = 0;
+function showLevelBanner(text, duration = 2500) {
+  const el = document.getElementById("levelBanner");
+  if (!el) return;
+  el.textContent = text;
+  el.classList.add("show");
+  clearTimeout(_bannerTimer);
+  _bannerTimer = setTimeout(() => el.classList.remove("show"), duration);
+}
 
 function addScore(points) {
   score += points;
@@ -181,6 +259,30 @@ function finalGameOverSound() {
   setTimeout(()=>noiseBurst(0.18,0.018),720);
 }
 
+function waveCompleteCelebration() {
+  ensureAudio();
+  // upward arpeggio fanfare: C5, E5, G5, C6
+  beep(523, 0.10, "triangle", 0.085);
+  setTimeout(()=>beep(659, 0.10, "triangle", 0.085), 90);
+  setTimeout(()=>beep(784, 0.10, "triangle", 0.085), 180);
+  setTimeout(()=>beep(1047, 0.20, "triangle", 0.09), 270);
+
+  // count up the clock by 10 seconds, 1s per tick, rising-pitch tick on each
+  const TOTAL = 10;
+  const STEP_MS = 120;
+  const START_DELAY = 480;
+  let added = 0;
+  function step() {
+    if (added >= TOTAL || gameOver || lifeOverlay) return;
+    addScore(1);
+    // pitch rises with each tick
+    beep(900 + added * 60, 0.045, "square", 0.07);
+    added++;
+    setTimeout(step, STEP_MS);
+  }
+  setTimeout(step, START_DELAY);
+}
+
 function clearActiveObjects() {
   for (const d of [...disks]) removeDisk(d, false);
   for (const t of [...targets]) removeTarget(t, false, false);
@@ -235,7 +337,8 @@ function resetGame(now) {
   clearActiveObjects();
   score = 0;
   timeLeft = MAX_TIME;
-  lives = 3;
+  lives = MAX_LIVES;
+  level = 1;
   paused = false;
   gameOver = false;
   lifeOverlay = false;
@@ -243,9 +346,23 @@ function resetGame(now) {
   lastTimerTick = now;
   lastTargetSpawn = now;
   lastBombSpawn = now;
+  waveBombSide = "left";
+  wavePointsSpawned = 0;
+  wavePauseEndTime = 0;
+  awaitingStart = true;
   updateScore();
   updateTimer();
   updateLives();
+  updateLevel();
+  seedRandom(GAME_SEED);
+  const _tap = document.getElementById("tapPrompt");
+  if (_tap) _tap.classList.remove("hidden");
+  const _rules = document.getElementById("rulesPrompt");
+  if (_rules) _rules.classList.remove("hidden");
+  const _lives = document.getElementById("lives");
+  if (_lives) _lives.classList.add("hidden");
+  const _level = document.getElementById("level");
+  if (_level) _level.classList.add("hidden");
   document.getElementById("pauseBtn").textContent = "pause";
   overlay.style.display = "none";
 }
@@ -259,6 +376,11 @@ function updateLaunchZone() {
   el.style.height = zoneR * 2 + "px";
   el.style.left = zoneX - zoneR + "px";
   el.style.top = zoneY - zoneR + "px";
+  const tap = document.getElementById("tapPrompt");
+  if (tap) {
+    tap.style.left = zoneX + "px";
+    tap.style.top = zoneY + "px";
+  }
 }
 
 function pointInZone(x,y){ return Math.hypot(x-zoneX,y-zoneY) <= zoneR; }
@@ -310,17 +432,18 @@ function removeDisk(d, explode=false) {
 function setDiskPos(d){ d.el.style.left=d.x+"px"; d.el.style.top=d.y+"px"; }
 
 function spawnTarget() {
-  const level=Math.random()<0.45 ? 1 : (Math.random()<0.75 ? 2 : 3);
+  const level=rng()<0.45 ? 1 : (rng()<0.75 ? 2 : 3);
   const size=level===1 ? 70 : level===2 ? 95 : 120;
-  const x=Math.random()*(innerWidth-size);
+  const x=rng()*(innerWidth-size);
   const y=-size - 2 * BLAST_R;
-  const speed=0.75+Math.random()*1.7;
+  const speed=(0.75+rng()*1.7) * levelSpeedMultiplier();
   const el=document.createElement("div");
   el.className="target";
   document.body.appendChild(el);
   const t={id:nextTargetId++,el,x,y,size,speed,hits:level,vx:0,vy:speed,points:level,reboundFrames:0,isGreen:false};
   targets.push(t);
   setTargetPos(t);
+  wavePointsSpawned += level;
 }
 
 function setTargetPos(t) {
@@ -333,10 +456,7 @@ function setTargetPos(t) {
 }
 
 function removeTarget(t, explode=false, awardPoints=false) {
-  if (awardPoints) {
-    if (t.isGreen) addTime(1);
-    else addScore(t.points);
-  }
+  if (awardPoints && !t.isGreen) addScore(t.points);
   if (explode) explodeSound();
   t.el.remove();
   const idx=targets.indexOf(t);
@@ -352,12 +472,19 @@ function shrinkTarget(t) {
 
 function spawnBomb() {
   const r=14, blastR=BLAST_R;
-  const x=Math.random()*(innerWidth-r*2)+r;
-  const y=-blastR;
-  const speed=0.9+Math.random()*0.35;
-  const dir=Math.random()<0.5 ? -1 : 1;
-  const vx=dir*speed/Math.SQRT2;
-  const vy=speed/Math.SQRT2;
+  const fromLeft = waveBombSide === "left";
+  // spawn so the blast is just off the entering side
+  const x = fromLeft ? -blastR : innerWidth + blastR;
+  // randomize entry height in the upper ~70% of the playfield, with margin
+  const yMin = blastR;
+  const yMax = Math.max(yMin + 1, innerHeight * 0.4);
+  const y = yMin + rng() * (yMax - yMin);
+  // widened speed and angle jitter
+  const speed = (0.6 + rng() * 1.0) * levelSpeedMultiplier();
+  const baseAngle = fromLeft ? 0 : Math.PI;
+  const angle = baseAngle + (rng() - 0.5) * 0.8; // +/- 0.4 rad (~23 degrees)
+  const vx = Math.cos(angle) * speed;
+  const vy = Math.sin(angle) * speed;
 
   const blastEl=document.createElement("div");
   blastEl.className="blast";
@@ -434,18 +561,31 @@ function handleDiskTargetHit(d,t) {
   hitCooldown.set(key,now);
 
   if (t.isGreen) {
-    explodeSound();
-    removeTarget(t,false,true);
+    // Drain phase: a green hit destroys it so the wave can actually end.
+    if (wavePointsSpawned >= WAVE_POINTS) {
+      explodeSound();
+      removeTarget(t, false, true);
+      removeDisk(d);
+      return true;
+    }
+    // Generating phase: instantly upgrade to a level-1 blue square and
+    // fling it upward at 3x the standard rebound speed.
+    t.isGreen = false;
+    t.hits = 1;
+    t.points = 1;
+    t.transformOnRebound = false;
+    t.vx = 0;
+    t.vy = -3 * Math.max(6, innerHeight / 120);
+    t.reboundFrames = Math.round(innerHeight / (2 * Math.abs(t.vy)));
+    bounceAwaySound();
     removeDisk(d);
     return true;
   }
 
   if (t.hits===1) {
+    // 1 → green: state change only. No fly-up; the square keeps falling.
     t.isGreen=true;
     t.points=0;
-    t.vx=0;
-    t.vy=-Math.max(6,innerHeight/120);
-    t.reboundFrames=Math.round(innerHeight/(2*Math.abs(t.vy)));
     setTargetPos(t);
     bounceAwaySound();
   } else {
@@ -468,7 +608,7 @@ function beginGesture(x,y) {
   if (paused || gameOver || lifeOverlay) return;
   ensureAudio();
   updateLaunchZone();
-  gesture={lastX:x,lastY:y,upX:x,upY:y,lastTime:performance.now(),vHistory:[],touchedZone:pointInZone(x,y)};
+  gesture={lastX:x,lastY:y,upX:x,upY:y,lastTime:performance.now(),vHistory:[],touchedZone:pointInZone(x,y),startX:x,startY:y,startTime:performance.now()};
 }
 
 function moveGesture(x,y) {
@@ -498,6 +638,33 @@ function endGesture(x,y) {
   gesture.upX=x;
   gesture.upY=y;
 
+  if (awaitingStart) {
+    const dx = x - gesture.startX;
+    const dy = y - gesture.startY;
+    const dist = Math.hypot(dx, dy);
+    const dur = performance.now() - gesture.startTime;
+    const tapped = dist < 20 && dur < 500 && pointInZone(x, y);
+    if (tapped) {
+      awaitingStart = false;
+      const tnow = performance.now();
+      lastTimerTick = tnow;
+      lastTargetSpawn = tnow;
+      lastBombSpawn = tnow;
+      wavePauseEndTime = tnow + WAVE_PAUSE_MS;
+      const tapEl = document.getElementById("tapPrompt");
+      if (tapEl) tapEl.classList.add("hidden");
+      const rulesEl = document.getElementById("rulesPrompt");
+      if (rulesEl) rulesEl.classList.add("hidden");
+      const livesEl = document.getElementById("lives");
+      if (livesEl) livesEl.classList.remove("hidden");
+      const levelEl = document.getElementById("level");
+      if (levelEl) levelEl.classList.remove("hidden");
+      showLevelBanner("Level 1");
+    }
+    gesture = null;
+    return;
+  }
+
   if (gesture.touchedZone && gesture.vHistory.length>=1) {
     const v=pickVelocityVector(gesture.vHistory);
     const cx=Math.max(R,Math.min(innerWidth-R,gesture.upX));
@@ -522,7 +689,7 @@ function animate(now) {
     return;
   }
 
-  if (!paused && now-lastTimerTick>=1000) {
+  if (!paused && !awaitingStart && now-lastTimerTick>=1000) {
     const ticks=Math.floor((now-lastTimerTick)/1000);
     lastTimerTick+=ticks*1000;
 
@@ -545,15 +712,37 @@ function animate(now) {
     return;
   }
 
-  if (now-lastTargetSpawn>1800) {
-    spawnTarget();
-    lastTargetSpawn=now;
+  if (awaitingStart) {
+    // no spawning until the user taps to start
+  } else // wave/pause phases:
+  //   (a) pause window: nothing spawns
+  //   (b) generating: spawn targets and bombs until WAVE_POINTS of squares have entered
+  //   (c) draining: stop spawning; wait for screen to clear, then flip side and pause
+  if (now < wavePauseEndTime) {
+    // (a) inter-wave pause — silent
+  } else if (wavePointsSpawned < WAVE_POINTS) {
+    // (b) generating phase
+    if (now-lastTargetSpawn>1800) {
+      spawnTarget(); // spawnTarget increments wavePointsSpawned
+      lastTargetSpawn=now;
+    }
+    if (now-lastBombSpawn>BOMB_SPAWN_INTERVAL_MS && bombs.length < BOMB_SOFT_CAP) {
+      spawnBomb();
+      lastBombSpawn=now;
+    }
+  } else if (targets.length === 0 && bombs.length === 0) {
+    // (c) wave fully drained — celebrate, advance level, flip bomb side, pause
+    waveCompleteCelebration();
+    level++;
+    updateLevel();
+    showLevelBanner("Level " + level);
+    waveBombSide = waveBombSide === "left" ? "right" : "left";
+    wavePointsSpawned = 0;
+    wavePauseEndTime = now + WAVE_PAUSE_MS;
+    lastTargetSpawn = now;
+    lastBombSpawn = now;
   }
-
-  if (now-lastBombSpawn>3600) {
-    spawnBomb();
-    lastBombSpawn=now;
-  }
+  // else: still draining (targets or bombs in flight) — no new spawns
 
   for (const t of targets) {
     t.x+=t.vx;
@@ -561,7 +750,17 @@ function animate(now) {
 
     if (t.reboundFrames>0) {
       t.reboundFrames--;
-      if (t.reboundFrames===0) t.vy=t.speed;
+      if (t.reboundFrames===0) {
+        t.vy = t.speed;
+        // If this rebound was triggered by hitting an already-green target,
+        // convert it back to a fresh level-1 blue square as it starts falling.
+        if (t.transformOnRebound) {
+          t.isGreen = false;
+          t.transformOnRebound = false;
+          t.hits = 1;
+          t.points = 1;
+        }
+      }
     }
 
     t.vx*=0.995;
@@ -571,17 +770,6 @@ function animate(now) {
   for (const b of bombs) {
     b.x+=b.vx;
     b.y+=b.vy;
-
-    if (b.x-b.blastR<0) {
-      b.x=b.blastR;
-      b.vx*=-1;
-    }
-
-    if (b.x+b.blastR>innerWidth) {
-      b.x=innerWidth-b.blastR;
-      b.vx*=-1;
-    }
-
     setBombPos(b);
   }
 
@@ -595,6 +783,13 @@ function animate(now) {
 
     d.x+=d.vx;
     d.y+=d.vy;
+
+    // Cap upward travel: a level-3 square spawns with its top at y = -(size + 2*BLAST_R)
+    // = -300. Past that the disk can't reach anything, so retire it.
+    if (d.y + D < -(2 * BLAST_R + 120)) {
+      removeDisk(d);
+      continue;
+    }
 
     if (d.x<0) {
       d.x=0;
@@ -653,11 +848,11 @@ function animate(now) {
 
   for (let i=bombs.length-1;i>=0;i--) {
     const b=bombs[i];
-
-    if (b.y-b.blastR>innerHeight) {
-      loseLife(now,"You lost a life");
-      requestAnimationFrame(animate);
-      return;
+    if (b.x - b.blastR > innerWidth ||
+        b.x + b.blastR < 0 ||
+        b.y - b.blastR > innerHeight ||
+        b.y + b.blastR < 0) {
+      removeBomb(b);
     }
   }
 
@@ -668,11 +863,14 @@ updateLaunchZone();
 updateScore();
 updateTimer();
 updateLives();
+updateLevel();
 
 const startNow=performance.now();
 lastTimerTick=startNow;
 lastTargetSpawn=startNow;
 lastBombSpawn=startNow;
+wavePauseEndTime=0;
+seedRandom(GAME_SEED);
 
 requestAnimationFrame(animate);
 </script>
