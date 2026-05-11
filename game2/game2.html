@@ -78,6 +78,7 @@ const WAVE_POINTS = 30;
 const WAVE_PAUSE_MS = 3500;
 const BOMB_SPAWN_INTERVAL_MS = 1800;
 const BOMB_SOFT_CAP = 4;
+const BOMB_PATTERN_STEPS = 5;
 const MAX_LIVES = 3;
 const LEVEL_SPEED_PER_LEVEL = 1.07;
 const GAME_SEED = 1;
@@ -94,6 +95,9 @@ let lastTargetSpawn = 0, lastBombSpawn = 0;
 let waveBombSide = "left"; // alternates each wave
 let wavePointsSpawned = 0;
 let wavePauseEndTime = 0;
+let bombsThisWave = 0;
+let drainConversionDone = false;
+let targetSpawnCount = 0; // cycles 3-2-1 deterministically
 let zoneX = 0, zoneY = 0, zoneR = 0;
 let gesture = null, audioCtx = null;
 let awaitingStart = true;
@@ -135,6 +139,36 @@ function updateLives(){
 }
 function updateLevel(){ document.getElementById("level").textContent = "Level: " + level; }
 function levelSpeedMultiplier(){ return Math.pow(LEVEL_SPEED_PER_LEVEL, level - 1); }
+
+// Per-square-size speed bands: level 3 (size 120) is slowest, level 2 medium,
+// level 1 (and the green "0" demoted from a 1) fastest. Each is scaled by the
+// per-game-level speed multiplier.
+function speedForLevel(lvl) {
+  // Deterministic per-size speeds, scaled by the per-game-level multiplier.
+  // 3 = slowest, 2 = medium, 1 (and demoted-to-1 greens) = fastest.
+  let base;
+  if (lvl >= 3)     base = 0.50;
+  else if (lvl===2) base = 0.80;
+  else              base = 1.20;
+  return base * levelSpeedMultiplier();
+}
+
+// Deterministic bomb y-position pattern. The current pattern is picked by the
+// game level (cycling every 3 levels):
+//   pattern 0: bottom -> top, looping
+//   pattern 1: top -> bottom, looping
+//   pattern 2: triangle wave (bottom -> top -> bottom)
+function bombPatternY(patternIdx, n, yMin, yMax) {
+  const steps = BOMB_PATTERN_STEPS;
+  const step = (yMax - yMin) / (steps - 1);
+  if (patternIdx === 0) return yMax - (n % steps) * step;
+  if (patternIdx === 1) return yMin + (n % steps) * step;
+  // pattern 2 (triangle)
+  const period = 2 * (steps - 1);
+  const phase = n % period;
+  const distFromMid = Math.abs(phase - (steps - 1));
+  return yMin + distFromMid * step;
+}
 
 // Deterministic PRNG (mulberry32). Seeded at game start; each "fresh game"
 // replays the same sequence of spawns. Audio-noise generation deliberately
@@ -349,6 +383,9 @@ function resetGame(now) {
   waveBombSide = "left";
   wavePointsSpawned = 0;
   wavePauseEndTime = 0;
+  bombsThisWave = 0;
+  drainConversionDone = false;
+  targetSpawnCount = 0;
   awaitingStart = true;
   updateScore();
   updateTimer();
@@ -403,14 +440,52 @@ function diskInsideAnyBlast(d) {
   return false;
 }
 
-function pickVelocityVector(vHistory) {
-  if (vHistory.length === 1) return vHistory[0];
-  if (vHistory.length === 2) return {
-    vx:(vHistory[0].vx+vHistory[1].vx)*0.5,
-    vy:(vHistory[0].vy+vHistory[1].vy)*0.5
-  };
-  const sorted = [...vHistory].sort((a,b)=>Math.hypot(a.vx,a.vy)-Math.hypot(b.vx,b.vy));
-  return sorted[1];
+// Fit a 2D line (principal axis via PCA) through the (x, y) pointer-trail
+// points and return a unit vector along it, oriented from the earliest
+// point toward the latest one. Caller must pass length >= 2.
+function fitLineDirection(points) {
+  const n = points.length;
+  let meanX = 0, meanY = 0;
+  for (const p of points) { meanX += p.x; meanY += p.y; }
+  meanX /= n; meanY /= n;
+  let cxx = 0, cxy = 0, cyy = 0;
+  for (const p of points) {
+    const dx = p.x - meanX, dy = p.y - meanY;
+    cxx += dx*dx; cxy += dx*dy; cyy += dy*dy;
+  }
+  // Top eigenvalue of the 2x2 covariance matrix [[cxx,cxy],[cxy,cyy]].
+  const tr = cxx + cyy;
+  const det = cxx*cyy - cxy*cxy;
+  const disc = Math.max(0, tr*tr/4 - det);
+  const lambda = tr/2 + Math.sqrt(disc);
+  let vx, vy;
+  if (Math.abs(cxy) > 1e-9) {
+    vx = cxy; vy = lambda - cxx;
+  } else if (cxx >= cyy) {
+    vx = 1; vy = 0;
+  } else {
+    vx = 0; vy = 1;
+  }
+  const len = Math.hypot(vx, vy) || 1;
+  vx /= len; vy /= len;
+  // Orient toward the later points.
+  const fdx = points[n-1].x - points[0].x;
+  const fdy = points[n-1].y - points[0].y;
+  if (vx*fdx + vy*fdy < 0) { vx = -vx; vy = -vy; }
+  return { vx, vy };
+}
+
+// Average of per-segment speeds (px/frame at 60fps).
+function averageSpeed(points) {
+  let total = 0, count = 0;
+  for (let i = 1; i < points.length; i++) {
+    const dx = points[i].x - points[i-1].x;
+    const dy = points[i].y - points[i-1].y;
+    const dt = Math.max(1, points[i].t - points[i-1].t);
+    total += Math.hypot(dx, dy) / dt * 16.67;
+    count++;
+  }
+  return count > 0 ? total / count : 0;
 }
 
 function makeDisk(cx,cy,vx,vy,now) {
@@ -432,11 +507,12 @@ function removeDisk(d, explode=false) {
 function setDiskPos(d){ d.el.style.left=d.x+"px"; d.el.style.top=d.y+"px"; }
 
 function spawnTarget() {
-  const level=rng()<0.45 ? 1 : (rng()<0.75 ? 2 : 3);
+  const level = [3, 2, 1][targetSpawnCount % 3];
+  targetSpawnCount++;
   const size=level===1 ? 70 : level===2 ? 95 : 120;
   const x=rng()*(innerWidth-size);
   const y=-size - 2 * BLAST_R;
-  const speed=(0.75+rng()*1.7) * levelSpeedMultiplier();
+  const speed = speedForLevel(level);
   const el=document.createElement("div");
   el.className="target";
   document.body.appendChild(el);
@@ -452,11 +528,11 @@ function setTargetPos(t) {
   t.el.style.width=t.size+"px";
   t.el.style.height=t.size+"px";
   t.el.style.background=t.isGreen ? GREEN : BLUE;
-  t.el.textContent=t.isGreen ? "0" : t.hits;
+  t.el.textContent = t.isGreen ? String(t.points) : t.hits;
 }
 
 function removeTarget(t, explode=false, awardPoints=false) {
-  if (awardPoints && !t.isGreen) addScore(t.points);
+  if (awardPoints) addScore(t.points);
   if (explode) explodeSound();
   t.el.remove();
   const idx=targets.indexOf(t);
@@ -467,7 +543,21 @@ function shrinkTarget(t) {
   t.hits--;
   if (t.hits===2) t.size=95;
   else if (t.hits===1) t.size=70;
+  t.speed = speedForLevel(t.hits);
+  if (t.vy > 0) t.vy = t.speed; // if already falling, apply the new speed immediately
   setTargetPos(t);
+}
+
+function convertAllSquaresToGreen() {
+  // Called at the moment the wave finishes generating. Every still-active
+  // square flips to green; t.points is preserved so the drain-phase
+  // explosion will award the appropriate value (3, 2, or 1).
+  for (const t of targets) {
+    if (!t.isGreen) {
+      t.isGreen = true;
+      setTargetPos(t);
+    }
+  }
 }
 
 function spawnBomb() {
@@ -475,16 +565,16 @@ function spawnBomb() {
   const fromLeft = waveBombSide === "left";
   // spawn so the blast is just off the entering side
   const x = fromLeft ? -blastR : innerWidth + blastR;
-  // randomize entry height in the upper ~70% of the playfield, with margin
-  const yMin = blastR;
-  const yMax = Math.max(yMin + 1, innerHeight * 0.4);
-  const y = yMin + rng() * (yMax - yMin);
-  // widened speed and angle jitter
-  const speed = (0.6 + rng() * 1.0) * levelSpeedMultiplier();
-  const baseAngle = fromLeft ? 0 : Math.PI;
-  const angle = baseAngle + (rng() - 0.5) * 0.8; // +/- 0.4 rad (~23 degrees)
-  const vx = Math.cos(angle) * speed;
-  const vy = Math.sin(angle) * speed;
+  // entry height: middle band of the playfield (30% – 55% down)
+  const yMin = Math.max(blastR, innerHeight * 0.30);
+  const yMax = Math.max(yMin + 1, innerHeight * 0.55);
+  // Deterministic y by per-wave pattern (cycles every 3 levels).
+  const patternIdx = (level - 1) % 3;
+  const y = bombPatternY(patternIdx, bombsThisWave, yMin, yMax);
+  // Deterministic speed; bombs fly purely horizontally.
+  const speed = 1.0 * levelSpeedMultiplier();
+  const vx = fromLeft ? speed : -speed;
+  const vy = 0;
 
   const blastEl=document.createElement("div");
   blastEl.className="blast";
@@ -497,6 +587,7 @@ function spawnBomb() {
   const b={id:nextBombId++,el:bombEl,blastEl,x,y,r,blastR,vx,vy};
   bombs.push(b);
   setBombPos(b);
+  bombsThisWave++;
 }
 
 function setBombPos(b) {
@@ -608,25 +699,22 @@ function beginGesture(x,y) {
   if (paused || gameOver || lifeOverlay) return;
   ensureAudio();
   updateLaunchZone();
-  gesture={lastX:x,lastY:y,upX:x,upY:y,lastTime:performance.now(),vHistory:[],touchedZone:pointInZone(x,y),startX:x,startY:y,startTime:performance.now()};
+  const _now = performance.now();
+  gesture = {lastX:x, lastY:y, upX:x, upY:y, lastTime:_now, touchedZone:pointInZone(x,y), startX:x, startY:y, startTime:_now, points:[{x, y, t:_now}]};
 }
 
 function moveGesture(x,y) {
   if (paused || gameOver || lifeOverlay || !gesture) return;
   updateLaunchZone();
 
-  const now=performance.now();
-  const dt=Math.max(1,now-gesture.lastTime);
-  const oldX=gesture.lastX, oldY=gesture.lastY;
-  const vx=(x-oldX)/dt*16.67;
-  const vy=(y-oldY)/dt*16.67;
+  const now = performance.now();
+  const oldX = gesture.lastX, oldY = gesture.lastY;
 
-  gesture.vHistory.push({vx,vy});
-  if (gesture.vHistory.length>3) gesture.vHistory.shift();
+  gesture.points.push({x, y, t: now});
 
   if (!gesture.touchedZone && segmentTouchesZone(oldX,oldY,x,y)) gesture.touchedZone=true;
 
-  gesture.lastX=x; gesture.lastY=y; gesture.upX=x; gesture.upY=y; gesture.lastTime=now;
+  gesture.lastX = x; gesture.lastY = y; gesture.upX = x; gesture.upY = y; gesture.lastTime = now;
 }
 
 function endGesture(x,y) {
@@ -665,11 +753,14 @@ function endGesture(x,y) {
     return;
   }
 
-  if (gesture.touchedZone && gesture.vHistory.length>=1) {
-    const v=pickVelocityVector(gesture.vHistory);
-    const cx=Math.max(R,Math.min(innerWidth-R,gesture.upX));
-    const cy=Math.max(R,Math.min(innerHeight-R,gesture.upY));
-    makeDisk(cx,cy,v.vx,v.vy,performance.now());
+  if (gesture.touchedZone && gesture.points.length >= 2) {
+    const dir = fitLineDirection(gesture.points);
+    const speed = averageSpeed(gesture.points);
+    const vx = dir.vx * speed;
+    const vy = dir.vy * speed;
+    const cx = Math.max(R, Math.min(innerWidth - R, gesture.upX));
+    const cy = Math.max(R, Math.min(innerHeight - R, gesture.upY));
+    makeDisk(cx, cy, vx, vy, performance.now());
     launchSound();
   }
 
@@ -741,6 +832,16 @@ function animate(now) {
     wavePauseEndTime = now + WAVE_PAUSE_MS;
     lastTargetSpawn = now;
     lastBombSpawn = now;
+    bombsThisWave = 0;
+    drainConversionDone = false;
+  } else {
+    // still draining (spawning done; squares and/or bombs in flight).
+    // The moment the LAST bomb leaves the field, convert remaining squares
+    // to greens (their original point values preserved).
+    if (!drainConversionDone && bombs.length === 0) {
+      convertAllSquaresToGreen();
+      drainConversionDone = true;
+    }
   }
   // else: still draining (targets or bombs in flight) — no new spawns
 
