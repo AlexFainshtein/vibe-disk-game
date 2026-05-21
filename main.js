@@ -11,6 +11,7 @@ const player = document.body.dataset.player ?? 'alex';
 const physicsPaths = {
   alex:   './Alex/alex-physics.js',
   alex1:  './Alex1/alex1-physics.js',
+  alex2:  './Alex2/alex2-physics.js',
   eugene: './Eugene/eugene-physics.js',
 };
 const physicsModule = await import(physicsPaths[player] ?? physicsPaths.alex);

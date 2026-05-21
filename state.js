@@ -18,6 +18,7 @@ export const screen = {
   backgrounds: {
     alex:   { top: '#071018', bottom: '#071018' },
     alex1:  { top: '#071018', bottom: '#071018' },
+    alex2:  { top: '#071018', bottom: '#071018' },
     eugene: { top: '#180710', bottom: '#1a0714' },
     zen1:   { top: '#071018', bottom: '#071018' }
   }
