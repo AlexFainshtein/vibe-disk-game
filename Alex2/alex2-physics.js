@@ -35,7 +35,9 @@ const COMPLIANCE       = 0;         // 0 = perfectly rigid; >0 = stretchy
 const LOG_INTERVAL     = 60;        // frames between console-log lines
 
 const ANCHOR_MARKER_RADIUS_FRAC = 1 / 60;
+const ANCHOR_GRAB_RADIUS_FRAC   = 1 / 30;  // tap inside this radius grabs the anchor without snapping it to the touch point
 const ANCHOR_COLOR = '#88c0d0';
+const ANCHOR_KEY_STEP = 5;                 // pixels per arrow-key press
 // Each segment is colored by its index along the chain (anchor → tip).
 // Hue rotates through the full spectrum so overlapping segments from
 // different parts of the chain are visually distinguishable.
@@ -57,29 +59,59 @@ function initRope(){
 initRope();
 
 // Anchor follows the finger when held. We use the empty-space hooks rather
-// than a disk-grab gesture so any touch on the canvas captures the anchor
-// (there is no other interactive object on screen).
-// TEMPORARY: anchor is constrained to horizontal motion at mid-canvas. The
-// touch's y coordinate is ignored; the anchor's y is locked to canvas.height/2
-// every frame (resize-safe).
+// than a disk-grab gesture so any touch on the canvas captures the anchor.
+// Two grab modes set at pointerdown:
+//   - Touch inside ANCHOR_GRAB_RADIUS of the anchor → grab with the touch's
+//     offset from the anchor preserved; the anchor does NOT snap. Subsequent
+//     moves keep the same offset, so the anchor follows the finger smoothly.
+//   - Touch outside that radius → anchor snaps to the touch (offset = 0).
+// Without this, tapping "on" the anchor would jostle it by a few pixels and
+// inject a transient velocity that the chain interprets as a fast flick.
 let anchorHeld = false;
+let grabOffsetX = 0;
+let grabOffsetY = 0;
 inputHooks.emptyDown = (x, y) => {
-  const lockedY = canvas.height / 2;
-  particles[0].x = x;
-  particles[0].y = lockedY;
-  particles[0].px = x;
-  particles[0].py = lockedY;
+  const grabR = Math.min(canvas.width, canvas.height) * ANCHOR_GRAB_RADIUS_FRAC;
+  const dx = x - particles[0].x;
+  const dy = y - particles[0].y;
+  if(Math.hypot(dx, dy) > grabR){
+    // Far from anchor: snap to the touch.
+    particles[0].x = x;
+    particles[0].y = y;
+    particles[0].px = x;
+    particles[0].py = y;
+    grabOffsetX = 0;
+    grabOffsetY = 0;
+  } else {
+    // Inside the grab zone: hold the anchor where it is, drag with offset.
+    grabOffsetX = particles[0].x - x;
+    grabOffsetY = particles[0].y - y;
+  }
   anchorHeld = true;
   return true; // capture pointer for subsequent move / up
 };
 inputHooks.emptyMove = (x, y) => {
   if(!anchorHeld) return;
-  particles[0].x = x;
-  particles[0].y = canvas.height / 2;
+  particles[0].x = x + grabOffsetX;
+  particles[0].y = y + grabOffsetY;
 };
 inputHooks.emptyUp = () => {
   anchorHeld = false;
 };
+
+// Arrow keys move the anchor in fixed increments — for controllable, axis-
+// aligned tests independent of touch jitter. The browser's key autorepeat
+// gives smooth motion when a key is held.
+window.addEventListener('keydown', (e) => {
+  let moved = false;
+  switch(e.key){
+    case 'ArrowLeft':  particles[0].x -= ANCHOR_KEY_STEP; moved = true; break;
+    case 'ArrowRight': particles[0].x += ANCHOR_KEY_STEP; moved = true; break;
+    case 'ArrowUp':    particles[0].y -= ANCHOR_KEY_STEP; moved = true; break;
+    case 'ArrowDown':  particles[0].y += ANCHOR_KEY_STEP; moved = true; break;
+  }
+  if(moved) e.preventDefault();
+});
 
 // Adaptive-iteration logging state. We track the worst iteration count and
 // the worst post-iteration violation across all substeps and all frames in
