@@ -19,7 +19,7 @@ bar.hidden = true;
 inputHooks.diskGrab = false;
 setDiskRadiusFraction(0);
 
-const N = 15;                       // particles in the chain
+const N = 150;                       // particles in the chain
 const ROPE_LENGTH_FRACTION = 0.45;  // fraction of canvas width
 
 // XPBD with substepping + adaptive constraint iterations. Each substep
