@@ -64,6 +64,7 @@ ES modules loaded via `<script type="module" src="main.js">` — must be served 
 Per-variant files (entry HTML, physics, feature modules, runtime toggles) are described in:
 
 @./CLAUDE-ALEX.md
+@./CLAUDE-ALEX2.md
 @./CLAUDE-EUGENE.md
 @./CLAUDE-ZEN1.md
 
