@@ -28,31 +28,18 @@ import { disk, bar, setDiskRadiusFraction } from '../playfield.js';
 //     over the frame, but spread across the substeps so the chain's θ̇
 //     ramps up gradually (and the quadratic Coriolis term doesn't see the
 //     full Δv-induced velocity at every substep).
-//
-// Multi-rope comparison view: same anchor input drives several ropes with
-// different N drawn one above the other, so we can see N-dependence directly.
 
 bar.hidden = true;
 inputHooks.diskGrab = false;
 setDiskRadiusFraction(0);
 
-const N1 = 50;
-const N2 = 100;
+const N = 14; // was 100;
 const ROPE_LENGTH_FRACTION = 0.45;
 
 // Total chain mass (excluding anchor). Distributed uniformly across the
 // N−1 non-anchor particles. Combined with the Lagrangian formulation,
 // dynamics should be approximately N-invariant.
 const M_ROPE = 1;
-
-// Visible-motion slowdown. The chain physics advances dt / SLOWDOWN per
-// real frame. NOTE: the anchor's drag motion is NOT slowed — only the
-// chain's internal physics is. So with SLOWDOWN > 1, drag will look
-// inconsistent (chain reacts slowly, anchor moves fast in physics terms).
-// Recommended: use SLOWDOWN = 1 with normal drag, OR SLOWDOWN > 1 with only
-// keyboard "kicks" (which apply impulses directly and ignore SLOWDOWN
-// artifacts).
-const SLOWDOWN = 1;
 
 // Internal RK4 substepping: per real frame, do RK4_SUBSTEPS_PER_FRAME
 // RK4 steps each of size h/RK4_SUBSTEPS_PER_FRAME, holding ax/ay constant
@@ -78,7 +65,7 @@ const ANCHOR_KEY_VELOCITY_STEP = 50;
 // property). Higher = stiffer, but too high will require smaller dt for
 // RK4 stability. Set to 0 to disable bending entirely (chain is a free
 // jointed pendulum with no restoring force).
-const BENDING_EI = 100;
+const BENDING_EI = 1;
 
 // --- Damping (non-conservative; added directly to the EOM, not Lagrangian) ---
 //
@@ -94,13 +81,31 @@ const BENDING_EI = 100;
 // by RK4's stability region: roughly c · max_eigenvalue(M⁻¹·D) · h < 2.78.
 // At N=100 with h≈1/60 that puts the upper limit somewhere around c ≈ 1;
 // keep this in mind when raising the value.
-const DAMPING_BEND = 1;
+const DAMPING_BEND = 1000;
 
 // DAMPING_MASS: mass-proportional damping. Subtracts α · θ̇ from θ̈ each
 // frame, so the time constant of every mode decays at rate α regardless of
 // frequency. Use to slowly bleed off rotation / bulk motion. 0 means the
 // chain coasts indefinitely (only DAMPING_BEND dissipates).
 const DAMPING_MASS = 0.1; // was 0
+
+// --- Implicit integrators (experimental, B3 in our discussion) --------
+//
+// INTEGRATOR: 'rk4' (explicit, the old default), 'implicit-midpoint'
+// (A-stable; conserves high-frequency modes — vulnerable to feedback
+// chaos in stiff regimes), or 'implicit-euler' (L-stable; damps
+// high-frequency modes, more robust to stiffness at the price of
+// slight artificial damping).  Both implicit variants share the same
+// per-substep Newton iteration; only the residual definition and the
+// Jacobian's h-coefficient differ.
+const INTEGRATOR                     = 'implicit-midpoint';
+const IMPLICIT_SUBSTEPS_PER_FRAME    = 16;
+const NEWTON_MAX_ITERS               = 8;
+// Newton convergence: stop when ‖Δy‖ / max(‖y‖, 1) < NEWTON_TOL.
+const NEWTON_TOL                     = 1e-6;
+// Diagnostic: when true, log a one-line summary per frame showing how
+// each substep's Newton iteration went.
+const NEWTON_LOG_ENABLED             = true;
 
 // --- Energy monitoring (diagnostic) ------------------------------------
 //
@@ -111,14 +116,10 @@ const DAMPING_MASS = 0.1; // was 0
 const ENERGY_MONITOR  = false;     // off — no console spam during this test
 const E_SPIKE_RATIO   = 100;       // log when E_new / E_prev exceeds this
 
-// --- Solo / trace mode (diagnostic) -----------------------------------
+// --- Trace mode (diagnostic) ------------------------------------------
 //
-// SOLO_MODE: keep only one chain active (instead of three side-by-side) so
-// trace output is readable.  Edit SOLO_N to test a different size.
 // TRACE_ENABLED + TRACE_DURATION_FRAMES: log θ_j every frame for the first
 // N frames after page load / Reset.  Stops automatically on NaN.
-const SOLO_MODE             = true;
-const SOLO_N                = N2;    // which N to test (defaults to 100)
 const TRACE_ENABLED         = false; // off — no per-frame console output during test
 const TRACE_DURATION_FRAMES = 600;   // ~10 seconds at 60 Hz — long enough to capture slow-drift explosions
 const TRACE_HEAD            = 5;     // how many θ_j to show from the start of the chain
@@ -222,27 +223,38 @@ function makeRope(N, baseX, baseY, opts = {}){
     // warning so it fires once per NaN episode; cleared by Reset or by E
     // becoming finite again.
     nanWarned:        false,
+    // --- Implicit-midpoint scratch ---
+    // A_raw, B_raw: M·(∂θ̈/∂θ) and M·(∂θ̈/∂θ̇) respectively, assembled at
+    // the midpoint state.  K = M − (h/2)·B_raw − (h²/4)·A_raw — the reduced
+    // Ns×Ns matrix whose LU we solve for Δθ each Newton iteration.
+    A_raw:            new Float64Array(Ns * Ns),
+    B_raw:            new Float64Array(Ns * Ns),
+    K:                new Float64Array(Ns * Ns),
+    M_snap:           new Float64Array(Ns * Ns),  // pristine M survives the Newton-iter linear solves
+    // State buffers across one implicit step.
+    thetaN:           new Float64Array(Ns),       // θ at start of step (y_n)
+    thetaDotN:        new Float64Array(Ns),       // θ̇ at start of step
+    thetaNew:         new Float64Array(Ns),       // current iterate of y_{n+1}
+    thetaDotNew:      new Float64Array(Ns),
+    thetaMid:         new Float64Array(Ns),       // (y_n + y_{n+1})/2
+    thetaDotMid:      new Float64Array(Ns),
+    ddtMid:           new Float64Array(Ns),       // θ̈ at midpoint (M·ddt = b_full)
+    F_theta:          new Float64Array(Ns),       // residual top half
+    F_thetaDot:       new Float64Array(Ns),       // residual bottom half
+    dTheta:           new Float64Array(Ns),       // Newton update for θ
+    dThetaDot:        new Float64Array(Ns),       // Newton update for θ̇
+    Krhs:             new Float64Array(Ns),       // RHS of the K·Δθ = … solve
+    tmpNs:            new Float64Array(Ns),       // general scratch
+    tmpNs2:           new Float64Array(Ns),       // general scratch
+    // Newton-iteration diagnostics, written by implicitMidpointStep and
+    // read by update() when NEWTON_LOG_ENABLED.
+    lastNewtonIters:    0,
+    lastNewtonRelStep:  0,
+    lastNewtonConverged: true,
   };
 }
 
-// Match the debug rope's per-link properties to N=100 so individual joints
-// see the same L, m, μ_jj at corresponding indices — only the total joint
-// count differs.
-const N100_segmentLength = (canvas.width * ROPE_LENGTH_FRACTION) / (N2 - 1);
-const N100_particleMass  = M_ROPE / (N2 - 1);
-const N_DEBUG = 4; // was 5                                    // 4 links → Ns = 4
-
-const ropes = SOLO_MODE
-  ? [makeRope(SOLO_N, canvas.width / 2, canvas.height * 0.5)]
-  : [
-      makeRope(N1, canvas.width / 2, canvas.height * 0.35),
-      makeRope(N2, canvas.width / 2, canvas.height * 0.45),
-      /*makeRope(N_DEBUG, canvas.width / 2, canvas.height * 0.55, {
-        segmentLength: N100_segmentLength,
-        particleMass:  N100_particleMass,
-      }), */
-      makeRope(N_DEBUG, canvas.width / 2, canvas.height * 0.55),
-    ];
+const ropes = [makeRope(N, canvas.width / 2, canvas.height * 0.5)];
 
 // --- Input-log CSV download -------------------------------------------
 
@@ -452,30 +464,23 @@ function buildRhs(rope, theta, thetaDot, ax, ay){
       }
       qDamp = DAMPING_BEND * lapThetaDot;
     }
-    // Nonlinear bending: V_pair(Δθ) = -4·kTheta·log(cos(Δθ/2)), so
-    // V'(Δθ) = 2·kTheta·tan(Δθ/2). Small-Δθ limit gives kTheta·Δθ, identical
-    // to the previous linear law; diverges as |Δθ| → π so adjacent segments
-    // can't fold onto each other. Generalized force on θ_j is
-    //   V'(θ_{j+1} − θ_j) − V'(θ_j − θ_{j−1}),
-    // recovering the discrete Laplacian sign convention in the linear limit.
+    // Linear bending — discrete Laplacian of θ scaled by k_θ, Neumann
+    // (free-end) BCs.  The previous tan(Δθ/2) anti-folding model was
+    // physically wrong (periodic in Δθ, can flip the bending sign and
+    // create a runaway under sustained forcing).  Linear bending grows
+    // monotonically with |Δθ| → always restoring → robust under any
+    // forcing, at the cost of allowing the rope to wind into loops.
     let qBend = 0;
     if(Ns >= 2 && BENDING_EI !== 0){
-      const piMinusEps = Math.PI - 0.01;
-      let vpLeft = 0;
-      if(j > 0){
-        let dl = theta[j] - theta[j - 1];
-        if(dl >  piMinusEps) dl =  piMinusEps;
-        else if(dl < -piMinusEps) dl = -piMinusEps;
-        vpLeft = 2 * kTheta * Math.tan(dl * 0.5);
+      let lapTheta;
+      if(j === 0){
+        lapTheta = theta[1] - theta[0];
+      } else if(j === Ns - 1){
+        lapTheta = theta[Ns - 2] - theta[Ns - 1];
+      } else {
+        lapTheta = theta[j - 1] - 2 * theta[j] + theta[j + 1];
       }
-      let vpRight = 0;
-      if(j < Ns - 1){
-        let dr = theta[j + 1] - theta[j];
-        if(dr >  piMinusEps) dr =  piMinusEps;
-        else if(dr < -piMinusEps) dr = -piMinusEps;
-        vpRight = 2 * kTheta * Math.tan(dr * 0.5);
-      }
-      qBend = vpRight - vpLeft;
+      qBend = kTheta * lapTheta;
     }
     rhs[j] = qAnchor - cj + qBend + qDamp;
   }
@@ -787,6 +792,267 @@ function rk4Step(rope, h, ax, ay){
   rope.pivotRatio = _solveMaxPivot > 0 ? _solveMinPivot / _solveMaxPivot : 0;
 }
 
+// --- Implicit-midpoint integrator (B3) --------------------------------
+
+// Assembles A_raw = M·(∂θ̈/∂θ) and B_raw = M·(∂θ̈/∂θ̇) at the state
+// (theta, thetaDot) with the midpoint acceleration ddt already computed.
+// Reads rope.M_snap as the pristine M(theta); writes rope.A_raw, rope.B_raw.
+//
+// Mass damping is folded in by treating the EOM RHS as
+//   b_full = Q_anchor − C + q_bend + q_strain − α · M · θ̇,
+// so M · θ̈ = b_full.  The −α·M·θ̇ piece adds −α·(∂M/∂θ_k)·θ̇ to ∂b/∂θ
+// and −α·M to ∂b/∂θ̇.  Both fold into the formulas below.
+function buildJacobianBlocks(rope, theta, thetaDot, ddt, ax, ay){
+  const Ns         = rope.Ns;
+  const L          = rope.segmentLength;
+  const m          = rope.particleMass;
+  const muDiag     = rope.muDiag;
+  const L2         = L * L;
+  const kTheta     = BENDING_EI / L;
+  const A          = rope.A_raw;
+  const B          = rope.B_raw;
+  const M          = rope.M_snap;
+  const w          = rope.tmpNs;
+  const S          = rope.tmpNs2;
+
+  A.fill(0);
+  B.fill(0);
+
+  // w_j := α·θ̇_j + ddt_j — single vector to contract with (∂M/∂θ_k),
+  // capturing both the −(∂M/∂θ_k)·ddt term in the A_raw formula and the
+  // −α·(∂M/∂θ_k)·θ̇ piece coming from differentiating −α·M·θ̇ in b_full.
+  for(let i = 0; i < Ns; i++) w[i] = DAMPING_MASS * thetaDot[i] + ddt[i];
+
+  // S_i := Σ_j L²·μ_{ij}·sin(θ_i − θ_j)·w_j — used on the i==k diagonal
+  // of the M-derivative contribution to A_raw.
+  for(let i = 0; i < Ns; i++){
+    let s = 0;
+    for(let j = 0; j < Ns; j++){
+      const mu = (Ns - Math.max(i, j)) * m;
+      s += L2 * mu * Math.sin(theta[i] - theta[j]) * w[j];
+    }
+    S[i] = s;
+  }
+
+  // --- A_raw assembly, column by column ---
+  for(let k = 0; k < Ns; k++){
+    const tdk2 = thetaDot[k] * thetaDot[k];
+
+    // ∂Q_anchor/∂θ_k = δ · L · μ_kk · (cos θ_k · ax + sin θ_k · ay) (diagonal)
+    A[k * Ns + k] += L * muDiag[k] * (Math.cos(theta[k]) * ax + Math.sin(theta[k]) * ay);
+
+    // −∂C_i/∂θ_k: off-diagonal piece +L²·μ_ik·cos(θ_i−θ_k)·θ̇_k² for all i,
+    // plus a diagonal correction −Σ_l L²·μ_kl·cos(θ_k−θ_l)·θ̇_l² at i = k.
+    for(let i = 0; i < Ns; i++){
+      const muIK = (Ns - Math.max(i, k)) * m;
+      A[i * Ns + k] += L2 * muIK * Math.cos(theta[i] - theta[k]) * tdk2;
+    }
+    let sumC = 0;
+    for(let l = 0; l < Ns; l++){
+      const muKL = (Ns - Math.max(k, l)) * m;
+      sumC += L2 * muKL * Math.cos(theta[k] - theta[l]) * thetaDot[l] * thetaDot[l];
+    }
+    A[k * Ns + k] -= sumC;
+
+    // −(∂M/∂θ_k)·w contribution.  (∂M/∂θ_k)_ij = L²·μ_ij·sin(θ_i−θ_j)·(δ_kj − δ_ki).
+    // → row i: −L²·μ_ik·sin(θ_i−θ_k)·w_k for all i (vanishes at i=k since sin 0 = 0)
+    //   plus +S_k at i = k (the δ_ki piece).
+    for(let i = 0; i < Ns; i++){
+      const muIK = (Ns - Math.max(i, k)) * m;
+      A[i * Ns + k] -= L2 * muIK * Math.sin(theta[i] - theta[k]) * w[k];
+    }
+    A[k * Ns + k] += S[k];
+  }
+
+  // Linear bending: tridiagonal contribution to A_raw with constant
+  // weight V''(Δθ) = kTheta.  Neumann BCs (free ends).
+  if(BENDING_EI !== 0 && Ns >= 2){
+    for(let i = 0; i < Ns; i++){
+      if(i < Ns - 1){
+        A[i * Ns + i]       -= kTheta;
+        A[i * Ns + (i + 1)] += kTheta;
+      }
+      if(i > 0){
+        A[i * Ns + i]       -= kTheta;
+        A[i * Ns + (i - 1)] += kTheta;
+      }
+    }
+  }
+
+  // --- B_raw assembly ---
+  // Dense parts: −∂C/∂θ̇_m and −α·M.
+  for(let j = 0; j < Ns; j++){
+    for(let mm = 0; mm < Ns; mm++){
+      const muJM = (Ns - Math.max(j, mm)) * m;
+      B[j * Ns + mm] -= 2 * L2 * muJM * Math.sin(theta[j] - theta[mm]) * thetaDot[mm];
+      B[j * Ns + mm] -= DAMPING_MASS * M[j * Ns + mm];
+    }
+  }
+
+  // Strain-rate damping: tridiagonal contribution (Neumann BCs).
+  if(DAMPING_BEND !== 0 && Ns >= 2){
+    const c = DAMPING_BEND;
+    B[0 * Ns + 0] -= c;
+    B[0 * Ns + 1] += c;
+    for(let j = 1; j < Ns - 1; j++){
+      B[j * Ns + (j - 1)] += c;
+      B[j * Ns + j]       -= 2 * c;
+      B[j * Ns + (j + 1)] += c;
+    }
+    B[(Ns - 1) * Ns + (Ns - 2)] += c;
+    B[(Ns - 1) * Ns + (Ns - 1)] -= c;
+  }
+}
+
+// One implicit step advancing (θ, θ̇) by h, parametrized by gamma:
+//   gamma = 0.5  → implicit midpoint: f evaluated at (y_n + y_new)/2,
+//                  Jacobian coefficient h·gamma = h/2; A-stable but not
+//                  L-stable (high-freq modes survive with bounded amplitude).
+//   gamma = 1.0  → implicit Euler:    f evaluated at y_new, Jacobian
+//                  coefficient h·gamma = h; both A- and L-stable
+//                  (high-freq modes damped per step).
+// In both cases Newton solves F(y_new) = 0 where
+//   F(y_new) = y_new − y_n − h · f(y_n + gamma·(y_new − y_n))
+// and the block-eliminated linear system is
+//   K · Δθ = M·r_θ + h·gamma·M·r_θ̇ − h·gamma·B_raw·r_θ
+// with K = M − h·gamma·B_raw − (h·gamma)²·A_raw.  Δθ̇ recovered from row 1
+// as Δθ̇ = (1/(h·gamma))·(Δθ − r_θ).
+// Returns true if Newton converged to NEWTON_TOL, false if it bailed at
+// NEWTON_MAX_ITERS.  Anchor acceleration (ax, ay) held constant.
+function implicitStep(rope, h, ax, ay, gamma){
+  const Ns          = rope.Ns;
+  const theta       = rope.theta;
+  const thetaDot    = rope.thetaDot;
+  const thetaN      = rope.thetaN;
+  const thetaDotN   = rope.thetaDotN;
+  const thetaNew    = rope.thetaNew;
+  const thetaDotNew = rope.thetaDotNew;
+  const thetaEval   = rope.thetaMid;       // f-evaluation point: y_n + gamma·(y_new − y_n)
+  const thetaDotEval= rope.thetaDotMid;
+  const ddtEval     = rope.ddtMid;
+  const F_theta     = rope.F_theta;
+  const F_thetaDot  = rope.F_thetaDot;
+  const dTheta      = rope.dTheta;
+  const dThetaDot   = rope.dThetaDot;
+  const A           = rope.A_raw;
+  const B           = rope.B_raw;
+  const K           = rope.K;
+  const Krhs        = rope.Krhs;
+  const Msnap       = rope.M_snap;
+  // r_θ = −F_theta, r_θ̇ = −F_thetaDot — read off F_* with negation at the
+  // use site to save scratch (rope.tmpNs / tmpNs2 are aliased inside
+  // buildJacobianBlocks, so we can't stage them there).
+
+  _solveMinPivot = Infinity;
+  _solveMaxPivot = 0;
+
+  thetaN.set(theta);
+  thetaDotN.set(thetaDot);
+
+  // Initial guess y_{n+1}^(0) = y_n + h · f(y_n) (one explicit Euler step).
+  // We fold mass damping into b_full here for consistency with the Newton loop.
+  buildMassMatrix(rope, thetaN);
+  Msnap.set(rope.M);
+  buildRhs(rope, thetaN, thetaDotN, ax, ay);
+  if(DAMPING_MASS !== 0){
+    for(let i = 0; i < Ns; i++){
+      let s = 0;
+      for(let j = 0; j < Ns; j++) s += Msnap[i * Ns + j] * thetaDotN[j];
+      rope.rhs[i] -= DAMPING_MASS * s;
+    }
+  }
+  solveLinear(rope);
+  for(let i = 0; i < Ns; i++){
+    thetaNew[i]    = thetaN[i]    + h * thetaDotN[i];
+    thetaDotNew[i] = thetaDotN[i] + h * rope.accel[i];
+  }
+
+  const oneMinusGamma = 1 - gamma;
+  const hg            = h * gamma;
+  const hg2           = hg * hg;
+  const invHg         = 1 / hg;
+
+  let converged = false;
+  let iters     = 0;
+  let lastRel   = 0;
+  for(let iter = 0; iter < NEWTON_MAX_ITERS; iter++){
+    iters = iter + 1;
+    // f-evaluation point: y_eval = (1 − γ)·y_n + γ·y_new.
+    for(let i = 0; i < Ns; i++){
+      thetaEval[i]    = oneMinusGamma * thetaN[i]    + gamma * thetaNew[i];
+      thetaDotEval[i] = oneMinusGamma * thetaDotN[i] + gamma * thetaDotNew[i];
+    }
+
+    // Build M(eval), snapshot, then b_full, then solve for ddt_eval.
+    buildMassMatrix(rope, thetaEval);
+    Msnap.set(rope.M);
+    buildRhs(rope, thetaEval, thetaDotEval, ax, ay);
+    if(DAMPING_MASS !== 0){
+      for(let i = 0; i < Ns; i++){
+        let s = 0;
+        for(let j = 0; j < Ns; j++) s += Msnap[i * Ns + j] * thetaDotEval[j];
+        rope.rhs[i] -= DAMPING_MASS * s;
+      }
+    }
+    solveLinear(rope);
+    ddtEval.set(rope.accel);
+
+    // Residual F(y_new) = y_new − y_n − h · f(y_eval).
+    for(let i = 0; i < Ns; i++){
+      F_theta[i]    = thetaNew[i]    - thetaN[i]    - h * thetaDotEval[i];
+      F_thetaDot[i] = thetaDotNew[i] - thetaDotN[i] - h * ddtEval[i];
+    }
+
+    // Jacobian blocks at the eval state.  Clobbers rope.tmpNs / tmpNs2.
+    buildJacobianBlocks(rope, thetaEval, thetaDotEval, ddtEval, ax, ay);
+
+    // K = M − hγ·B_raw − (hγ)²·A_raw.
+    const Ns2 = Ns * Ns;
+    for(let i = 0; i < Ns2; i++){
+      K[i] = Msnap[i] - hg * B[i] - hg2 * A[i];
+    }
+
+    // Krhs = M·r_θ + hγ·M·r_θ̇ − hγ·B·r_θ, with r = −F.
+    for(let i = 0; i < Ns; i++){
+      let mTheta = 0, mThetaDot = 0, bTheta = 0;
+      for(let j = 0; j < Ns; j++){
+        mTheta    += Msnap[i * Ns + j] * (-F_theta[j]);
+        mThetaDot += Msnap[i * Ns + j] * (-F_thetaDot[j]);
+        bTheta    += B[i * Ns + j]     * (-F_theta[j]);
+      }
+      Krhs[i] = mTheta + hg * mThetaDot - hg * bTheta;
+    }
+
+    // Solve K·Δθ = Krhs.
+    gaussSolve(Ns, K, Krhs, dTheta);
+
+    // Recover Δθ̇ = (1/(hγ))·(Δθ + F_theta).
+    let dNorm2 = 0, yNorm2 = 0;
+    for(let i = 0; i < Ns; i++){
+      dThetaDot[i]    = invHg * (dTheta[i] + F_theta[i]);
+      thetaNew[i]    += dTheta[i];
+      thetaDotNew[i] += dThetaDot[i];
+      dNorm2 += dTheta[i] * dTheta[i] + dThetaDot[i] * dThetaDot[i];
+      yNorm2 += thetaNew[i] * thetaNew[i] + thetaDotNew[i] * thetaDotNew[i];
+    }
+    const denom = Math.max(Math.sqrt(yNorm2), 1);
+    lastRel = Math.sqrt(dNorm2) / denom;
+    if(lastRel < NEWTON_TOL){ converged = true; break; }
+  }
+
+  theta.set(thetaNew);
+  thetaDot.set(thetaDotNew);
+
+  rope.pivotMin            = _solveMinPivot;
+  rope.pivotMax            = _solveMaxPivot;
+  rope.pivotRatio          = _solveMaxPivot > 0 ? _solveMinPivot / _solveMaxPivot : 0;
+  rope.lastNewtonIters     = iters;
+  rope.lastNewtonRelStep   = lastRel;
+  rope.lastNewtonConverged = converged;
+
+  return converged;
+}
+
 // --- Update loop -------------------------------------------------------
 
 function updateParticlePositions(rope){
@@ -808,8 +1074,7 @@ function updateParticlePositions(rope){
 }
 
 export function update(dt){
-  // Slow-motion: physics advances dt / SLOWDOWN per real frame.
-  const h = dt / SLOWDOWN;
+  const h = dt;
   if(h <= 0) return;
 
   // ax, ay are the anchor's smoothed acceleration over this frame, fed to
@@ -861,15 +1126,42 @@ export function update(dt){
     _frameAy     = 0;
   }
 
-  // Per real frame, do RK4_SUBSTEPS_PER_FRAME RK4 steps each advancing
-  // physics by h_sub = h/N.  Anchor acceleration (ax, ay) is held constant
-  // across substeps (the chain receives the same total impulse it would
-  // have with a single h-step), but the integrator sees a smaller h, which
-  // reduces RK4's amplification of nonlinear Coriolis terms.
-  const h_sub = h / RK4_SUBSTEPS_PER_FRAME;
+  // Per real frame, take SUBSTEPS_PER_FRAME steps of the active integrator
+  // (RK4 or implicit midpoint).  Anchor acceleration (ax, ay) is held
+  // constant across substeps — the chain receives the same total impulse
+  // it would have with a single h-step.
+  // gamma encodes which implicit method we're running:
+  // 0.5 → midpoint, 1.0 → Euler.  null means RK4 (no Newton iteration).
+  const gamma    = INTEGRATOR === 'implicit-midpoint' ? 0.5
+                 : INTEGRATOR === 'implicit-euler'    ? 1.0
+                 : null;
+  const isImplicit = gamma !== null;
+  const substeps = isImplicit ? IMPLICIT_SUBSTEPS_PER_FRAME : RK4_SUBSTEPS_PER_FRAME;
+  const h_sub    = h / substeps;
+  // Per-frame Newton log, only used when NEWTON_LOG_ENABLED.  Captures
+  // (iters, relStep, converged) for every substep across every rope so we
+  // can spot Newton failures or near-failures.
+  const newtonItersArr   = NEWTON_LOG_ENABLED ? new Array(substeps) : null;
+  const newtonRelArr     = NEWTON_LOG_ENABLED ? new Array(substeps) : null;
+  let   newtonConvCount  = 0;
   for(const rope of ropes){
-    for(let s = 0; s < RK4_SUBSTEPS_PER_FRAME; s++){
-      rk4Step(rope, h_sub, ax, ay);
+    for(let s = 0; s < substeps; s++){
+      if(isImplicit){
+        implicitStep(rope, h_sub, ax, ay, gamma);
+        if(NEWTON_LOG_ENABLED){
+          newtonItersArr[s] = rope.lastNewtonIters;
+          newtonRelArr[s]   = rope.lastNewtonRelStep;
+          if(rope.lastNewtonConverged) newtonConvCount++;
+        }
+      } else {
+        rk4Step(rope, h_sub, ax, ay);
+      }
+    }
+    if(NEWTON_LOG_ENABLED && isImplicit){
+      const itersStr = newtonItersArr.join(',');
+      const relStr   = newtonRelArr.map(r => Number.isFinite(r) ? r.toExponential(2) : String(r)).join(',');
+      console.log(`[Newton N=${rope.N}] iters=[${itersStr}] relStep=[${relStr}] converged=${newtonConvCount}/${substeps} (${INTEGRATOR})`);
+      newtonConvCount = 0;
     }
     if(CONDITION_ESTIMATE) estimateConditionNumber(rope);
     if(ENERGY_MONITOR){

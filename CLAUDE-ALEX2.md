@@ -12,7 +12,7 @@ Alex2 is the second of Alex's chain experiments. The first variant (see git hist
 
 Drag the small anchor dot to whip the chain around. The chain hangs from the anchor; all motion in the chain comes from anchor motion plus the chain's own dynamics (no gravity in this variant — that's an obvious add-on, deliberately left off so the dynamics tester sees only the spring/Coriolis/bending behavior).
 
-Two chains are drawn one above the other by default (N=50, N=100), so the **N-dependence is visible directly** — same anchor input drives both, and a correct Lagrangian formulation should make the two chains move nearly identically. `SOLO_MODE = true` (current default) keeps only the N=100 chain for cleaner traces.
+A single chain is drawn by default (`N = 100`). The factory `makeRope` and the array-of-ropes structure are kept so the variant can be extended to a multi-rope comparison view (e.g. N=50 vs N=100, same anchor input) by pushing additional `makeRope(...)` calls into the `ropes` array — useful for verifying N-invariance after future integrator changes.
 
 Input:
 - **Mouse drag** on the anchor dot — smooth continuous driving.
@@ -35,13 +35,9 @@ Q_anchor_j = L · μ_{jj} · (sin θ_j · ẍ_anchor − cos θ_j · ÿ_anchor)
 μ_{jk}     = Σ_{i ≥ max(j,k)} m_i                   (lumped mass; uniform → (Ns − max(j,k))·m)
 ```
 
-**Bending** is **nonlinear**, designed so that adjacent segments cannot fold onto each other. The per-pair potential is
-```
-V_pair(Δθ) = −4 · k_θ · log(cos(Δθ/2)),     k_θ = BENDING_EI / L
-```
-giving `V'(Δθ) = 2·k_θ·tan(Δθ/2)`. The small-Δθ limit (`tan(Δθ/2) ≈ Δθ/2`) recovers the linear angular spring `V'(Δθ) ≈ k_θ·Δθ` — so `BENDING_EI` keeps tuning the same "soft-regime stiffness" it did before. As |Δθ| → π the restoring torque diverges, preventing fold-over. A small ε-clamp keeps `|Δθ|` away from the `tan` singularity.
+**Bending** is **linear**: V_pair(Δθ) = (1/2)·k_θ·Δθ², so `V'(Δθ) = k_θ·Δθ` with `k_θ = BENDING_EI / L`. The generalized bending force on θ_j is the discrete Laplacian `k_θ·(θ_{j−1} − 2·θ_j + θ_{j+1})` with Neumann (free-end) boundary conditions.
 
-The generalized bending force on θ_j is `V'(θ_{j+1} − θ_j) − V'(θ_j − θ_{j−1})` (free-end Neumann BCs).
+We previously had a nonlinear anti-folding model with `V'(Δθ) = 2·k_θ·tan(Δθ/2)` plus a Δθ-based clamp near ±π, intended to prevent the rope from passing through itself. It turned out to be **physically wrong** — the periodic tan(Δθ/2) form gave the bending force a sign-flip past every odd multiple of π (force "aiding" rather than "restoring"), which under sustained heavy forcing caused runaway in the integrator. Real bending energy isn't periodic in Δθ — winding around adds energy. Linear bending captures this correctly and is robust under any forcing. We accept that loops can form as a consequence; if anti-folding behavior is desired later, the right form is linear + a non-periodic soft barrier (e.g. `β·exp(c·(|Δθ| − π_max))`), NOT a periodic tan-based form. See [Alex2/tests/FINDINGS.md](Alex2/tests/FINDINGS.md) for the diagnosis.
 
 **Strain-rate damping** is the linear discrete Laplacian on θ̇ (same Neumann BCs): pulls each joint's angular velocity toward its neighbors'. Zero effect on rigid rotation (all θ̇ equal → Laplacian = 0), suppresses high-frequency / alternating-sign modes exponentially. Coefficient `DAMPING_BEND`.
 
@@ -59,7 +55,7 @@ Explicit RK4 on the first-order system `y' = f(y)`, `y = [θ, θ̇]`. Each RK4 e
 
 That's 4 builds + 4 solves per RK4 step. At N=100 this is ~4M ops per step; fits comfortably in a frame.
 
-**Internal substepping** (`RK4_SUBSTEPS_PER_FRAME = 16`): each real frame, the integrator does N small RK4 steps of size `h/N`. Why per-frame substepping instead of `SLOWDOWN > 1`: slowdown would advance chain time at `h/SLOWDOWN` but leave the anchor running at the wall-clock rate, producing an anchor-vs-chain time mismatch (chain reacts slowly, anchor moves fast in physics terms). Substepping refines the chain integration without changing the chain's total physics time per real frame, so the anchor stays in lockstep.
+**Internal substepping** (`RK4_SUBSTEPS_PER_FRAME = 16`): each real frame, the integrator does that many small RK4 steps of size `h / RK4_SUBSTEPS_PER_FRAME`. Total physics time per real frame is unchanged (= h), so anchor and chain stay in lockstep — no anchor-vs-chain time mismatch.
 
 Refining h is the **B2** robustness lever: smaller h reduces RK4's substep-amplification of the nonlinear Coriolis term, raising the |θ̇| threshold at which the integrator blows up.
 
@@ -77,17 +73,14 @@ Arrow-key kicks bypass this entirely: they apply an exact angular-momentum impul
 
 | Constant | Default | Role |
 |---|---|---|
-| `N1`, `N2` | 50, 100 | Two side-by-side chain sizes for the comparison view |
-| `ROPE_LENGTH_FRACTION` | 0.45 | Each chain's total length as a fraction of canvas width |
-| `M_ROPE` | 1 | Total mass of one chain (excluding anchor) |
-| `SLOWDOWN` | 1 | Visible-motion slowdown (keep at 1 with mouse drag — see note above) |
+| `N` | 100 | Number of particles in the chain (joints = N − 1) |
+| `ROPE_LENGTH_FRACTION` | 0.45 | Chain's total length as a fraction of canvas width |
+| `M_ROPE` | 1 | Total chain mass (excluding anchor) |
 | `RK4_SUBSTEPS_PER_FRAME` | 16 | Internal RK4 substeps per real frame (the B2 robustness lever) |
 | `ANCHOR_KEY_VELOCITY_STEP` | 50 px/s | Arrow-key impulse magnitude |
 | `BENDING_EI` | 100 | Continuum flexural rigidity; `k_θ = BENDING_EI / L` |
 | `DAMPING_BEND` | 1 | Strain-rate (discrete Laplacian on θ̇) damping coefficient |
 | `DAMPING_MASS` | 0.1 | Mass-proportional damping coefficient |
-| `SOLO_MODE` | true | Keep only one chain (clean traces); false = comparison view |
-| `SOLO_N` | N2 | Which chain size to keep in solo mode |
 
 ### Diagnostic flags (all currently false; flip individually to investigate)
 
@@ -104,7 +97,7 @@ All diagnostic outputs go to the console; substep log dumps to a CSV when tracin
 ## Known limitations
 
 - **RK4 sensitivity to θ̈·h²** — the failure mode is not linear instability but nonlinear: inside one RK4 step, the four k_i evaluations each see the previous one's overshoot, and once θ̈·h² becomes comparable to a characteristic angle, the four k_i diverge geometrically within a single step. `RK4_SUBSTEPS_PER_FRAME = 16` raises the threshold significantly but hard mouse drags can still crash the chain (NaN).
-- **Tiny knots under fast rotation** — when the chain is spinning, the (centrifugal-character) `C` term creates strong stress along the chain, which the nonlinear bending balances at a small but visible Δθ. The result reads as a tiny "knot" or pinch-point on the otherwise smooth curve. They're stable while rotation continues and unwind on release. Visible but cosmetic.
+- **Long-persistent "chaos"** at default damping — brief mouse inputs can trigger a regime where the chain keeps moving for *much longer* than the mass-damping time-constant (~10 sec at `α = 0.1`) would predict. Open question as of 2026-05-30: what amplifies the response beyond simple linear-mode decay. Higher damping suppresses it but at the cost of sluggish feel; investigation pending.
 - **No gravity / no friction / no collisions** — by design. The point is to stress-test the integrator and bending, not to build a complete sandbox.
 
 ## Future directions
