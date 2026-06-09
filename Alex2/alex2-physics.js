@@ -33,7 +33,7 @@ bar.hidden = true;
 inputHooks.diskGrab = false;
 setDiskRadiusFraction(0);
 
-const N = 14; // was 100;
+const N = 100;
 const ROPE_LENGTH_FRACTION = 0.45;
 
 // Total chain mass (excluding anchor). Distributed uniformly across the
@@ -99,8 +99,17 @@ const DAMPING_MASS = 0.1; // was 0
 // per-substep Newton iteration; only the residual definition and the
 // Jacobian's h-coefficient differ.
 const INTEGRATOR                     = 'implicit-midpoint';
-const IMPLICIT_SUBSTEPS_PER_FRAME    = 16;
+const IMPLICIT_SUBSTEPS_PER_FRAME    = 32; // 16 is not robust enough for N=100 at BENDING_EI=1; 32 is, with some room to spare. 64 is overkill.
 const NEWTON_MAX_ITERS               = 8;
+// Warm-start: seed each substep's Newton iteration from the previous
+// substep's realized increment (linear extrapolation y⁰ = yₙ + Δy_prev)
+// instead of one explicit-Euler step (y⁰ = yₙ + h·f(yₙ)).  The realized
+// increment is bounded physical motion, so it avoids the h·θ̈ overshoot
+// that walks the explicit-Euler guess out of Newton's convergence basin
+// once θ̈ gets large.  Falls back to explicit Euler when no prior
+// increment is available (first substep after Reset / impulse / a
+// non-converged step).  Toggle false to compare against the cold-start.
+const NEWTON_WARM_START              = true;
 // Newton convergence: stop when ‖Δy‖ / max(‖y‖, 1) < NEWTON_TOL.
 const NEWTON_TOL                     = 1e-6;
 // Diagnostic: when true, log a one-line summary per frame showing how
@@ -113,7 +122,7 @@ const NEWTON_LOG_ENABLED             = true;
 // system this is exactly conserved (Noether); with damping it must
 // monotonically decrease. Anything else — sudden spikes, NaN, runaway
 // growth — is a numerical-stability problem we want to catch in the act.
-const ENERGY_MONITOR  = false;     // off — no console spam during this test
+const ENERGY_MONITOR  = true;     // off — no console spam during this test
 const E_SPIKE_RATIO   = 100;       // log when E_new / E_prev exceeds this
 
 // --- Trace mode (diagnostic) ------------------------------------------
@@ -148,6 +157,15 @@ const SUBSTEP_LOG_HEAD      = 20;
 //   vx, vy — px per frame  (= raw position delta this frame)
 //   ax, ay — px per frame²  (= change in velocity-per-frame from last frame)
 const INPUT_LOG_ENABLED         = false; // off — no CSV writing during test
+
+// THETA_LOG: per-frame samples of θ_i at three fixed joint indices
+// (left / middle / right of chain).  Recording starts on the first
+// anchor interaction; dump via window.alex2.dumpThetaLog().  Defaults
+// are for N=14 (Ns=13).  Edit THETA_LOG_I_* if Ns differs.
+const THETA_LOG_ENABLED         = false;
+const THETA_LOG_I_LEFT          = 1;
+const THETA_LOG_I_MID           = 6;
+const THETA_LOG_I_RIGHT         = 11;
 
 // --- Rope factory ------------------------------------------------------
 
@@ -246,6 +264,12 @@ function makeRope(N, baseX, baseY, opts = {}){
     Krhs:             new Float64Array(Ns),       // RHS of the K·Δθ = … solve
     tmpNs:            new Float64Array(Ns),       // general scratch
     tmpNs2:           new Float64Array(Ns),       // general scratch
+    // Warm-start: realized increment (Δθ, Δθ̇) of the previous converged
+    // substep, used as the next substep's Newton initial guess.  Valid only
+    // after a converged step; invalidated on Reset / impulse.
+    prevDTheta:       new Float64Array(Ns),
+    prevDThetaDot:    new Float64Array(Ns),
+    warmStartValid:   false,
     // Newton-iteration diagnostics, written by implicitMidpointStep and
     // read by update() when NEWTON_LOG_ENABLED.
     lastNewtonIters:    0,
@@ -320,10 +344,84 @@ function dumpSubstepLog(reason = 'manual'){
   console.log(`[substep] dumped ${substepLogRows.length} rows to CSV (reason: ${reason})`);
 }
 
+// Dump the per-frame θ log accumulated in thetaLogRows.  Each row is
+// [frame, t_seconds, theta_left, theta_mid, theta_right] capturing θ_i
+// at the three configured joint indices.  Gated by THETA_LOG_ENABLED.
+function dumpThetaLog(reason = 'manual'){
+  if(typeof window === 'undefined' || typeof document === 'undefined') return;
+  if(thetaLogRows.length === 0){
+    console.log('[theta] no rows to dump');
+    return;
+  }
+  const header = `frame,t_sec,theta_i${THETA_LOG_I_LEFT},theta_i${THETA_LOG_I_MID},theta_i${THETA_LOG_I_RIGHT}\n`;
+  const body = thetaLogRows.map(r =>
+    r.map((v, i) => i === 0 ? String(v) : (Number.isFinite(v) ? v.toFixed(6) : String(v))).join(',')
+  ).join('\n');
+  const csv = header + body + '\n';
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url  = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href     = url;
+  a.download = `alex2-theta-${Date.now()}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  console.log(`[theta] dumped ${thetaLogRows.length} rows to CSV (reason: ${reason})`);
+}
+
+// Dump the current θ and θ̇ of all joints (rope 0) to BOTH a CSV file
+// (spreadsheet-friendly) and a JSON file (full numerical precision for
+// copy-paste back into chat).  Optional `label` becomes part of each
+// filename so before/after snapshots can be told apart.
+function dumpFullState(label = 'state'){
+  if(typeof window === 'undefined' || typeof document === 'undefined') return;
+  const rope = ropes[0];
+  const Ns = rope.Ns;
+  const ts = Date.now();
+
+  // CSV form
+  let csv = 'joint_index,theta,theta_dot\n';
+  for(let i = 0; i < Ns; i++){
+    const t  = rope.theta[i];
+    const td = rope.thetaDot[i];
+    const tStr  = Number.isFinite(t)  ? t.toExponential(15)  : String(t);
+    const tdStr = Number.isFinite(td) ? td.toExponential(15) : String(td);
+    csv += `${i},${tStr},${tdStr}\n`;
+  }
+  triggerDownload(csv, `alex2-state-${label}-${ts}.csv`, 'text/csv');
+
+  // JSON form — full double precision via Array.from + JSON.stringify
+  const json = JSON.stringify({
+    label,
+    timestamp: ts,
+    Ns,
+    theta:    Array.from(rope.theta),
+    thetaDot: Array.from(rope.thetaDot),
+  }, null, 2);
+  triggerDownload(json, `alex2-state-${label}-${ts}.json`, 'application/json');
+
+  console.log(`[state] dumped ${Ns} joints (${label}) — CSV + JSON`);
+}
+
+// Helper for the dump functions: trigger a browser download of `content`
+// with the given filename and MIME type.
+function triggerDownload(content, filename, mimeType){
+  const blob = new Blob([content], { type: mimeType });
+  const url  = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href     = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 // Expose ropes on window for console-side inspection during debugging:
 // `alex2.ropes[0].theta`, etc.  Also exposes dumpInputLog() for manual
 // CSV download.
-if(typeof window !== 'undefined') window.alex2 = { ropes, dumpInputLog, dumpSubstepLog };
+if(typeof window !== 'undefined') window.alex2 = { ropes, dumpInputLog, dumpSubstepLog, dumpThetaLog, dumpFullState };
 
 // Trace state: counts frames since page load / last Reset. Tracing waits
 // for the first anchor input (via applyAnchorVelocityImpulse) before
@@ -343,6 +441,13 @@ const inputLogRows = [];   // each row: [frame, x, y, vx, vy, ax, ay]
 // tracing is active; dumped to its own CSV when tracing stops (or on
 // demand via window.alex2.dumpSubstepLog()).
 const substepLogRows   = [];   // each row: [frame, substep, rhs_0..H, ddt_0..H]
+
+// Delta log: per-frame samples of Δθ at three fixed joint indices.
+// Recording starts on first anchor interaction; one row per frame.
+// Dumped on demand via window.alex2.dumpDeltaLog().
+const thetaLogRows     = [];   // each row: [frame, t_sec, theta_left, theta_mid, theta_right]
+let   thetaLogFrameCount = 0;
+let   thetaLogTimeSec    = 0;  // cumulative wall-clock time since logging started
 
 // --- Anchor state (shared across both ropes) ---------------------------
 
@@ -655,6 +760,9 @@ function applyAnchorVelocityImpulse(dvx, dvy){
     for(let j = 0; j < Ns; j++){
       rope.thetaDot[j] += rope.accel[j];
     }
+    // θ̇ just jumped discontinuously — the prior substep's increment no longer
+    // predicts the next one, so cold-start the next Newton solve.
+    rope.warmStartValid = false;
   }
 }
 
@@ -949,22 +1057,37 @@ function implicitStep(rope, h, ax, ay, gamma){
   thetaN.set(theta);
   thetaDotN.set(thetaDot);
 
-  // Initial guess y_{n+1}^(0) = y_n + h · f(y_n) (one explicit Euler step).
-  // We fold mass damping into b_full here for consistency with the Newton loop.
-  buildMassMatrix(rope, thetaN);
-  Msnap.set(rope.M);
-  buildRhs(rope, thetaN, thetaDotN, ax, ay);
-  if(DAMPING_MASS !== 0){
+  // Initial guess for the Newton iterate y_{n+1}^(0).
+  if(NEWTON_WARM_START && rope.warmStartValid){
+    // Warm start: linear extrapolation from the previous converged substep's
+    // realized increment, y⁰ = y_n + Δy_prev.  Bounded physical motion, so it
+    // can't overshoot Newton's basin the way h·θ̈ can; also skips the
+    // explicit-Euler build+solve entirely (one fewer O(N³) solve per substep).
+    const prevDTheta    = rope.prevDTheta;
+    const prevDThetaDot = rope.prevDThetaDot;
     for(let i = 0; i < Ns; i++){
-      let s = 0;
-      for(let j = 0; j < Ns; j++) s += Msnap[i * Ns + j] * thetaDotN[j];
-      rope.rhs[i] -= DAMPING_MASS * s;
+      thetaNew[i]    = thetaN[i]    + prevDTheta[i];
+      thetaDotNew[i] = thetaDotN[i] + prevDThetaDot[i];
     }
-  }
-  solveLinear(rope);
-  for(let i = 0; i < Ns; i++){
-    thetaNew[i]    = thetaN[i]    + h * thetaDotN[i];
-    thetaDotNew[i] = thetaDotN[i] + h * rope.accel[i];
+  } else {
+    // Cold start: one explicit-Euler step, y⁰ = y_n + h·f(y_n).  Used on the
+    // first substep after Reset / impulse / a non-converged step.  We fold
+    // mass damping into b_full here for consistency with the Newton loop.
+    buildMassMatrix(rope, thetaN);
+    Msnap.set(rope.M);
+    buildRhs(rope, thetaN, thetaDotN, ax, ay);
+    if(DAMPING_MASS !== 0){
+      for(let i = 0; i < Ns; i++){
+        let s = 0;
+        for(let j = 0; j < Ns; j++) s += Msnap[i * Ns + j] * thetaDotN[j];
+        rope.rhs[i] -= DAMPING_MASS * s;
+      }
+    }
+    solveLinear(rope);
+    for(let i = 0; i < Ns; i++){
+      thetaNew[i]    = thetaN[i]    + h * thetaDotN[i];
+      thetaDotNew[i] = thetaDotN[i] + h * rope.accel[i];
+    }
   }
 
   const oneMinusGamma = 1 - gamma;
@@ -1038,6 +1161,20 @@ function implicitStep(rope, h, ax, ay, gamma){
     const denom = Math.max(Math.sqrt(yNorm2), 1);
     lastRel = Math.sqrt(dNorm2) / denom;
     if(lastRel < NEWTON_TOL){ converged = true; break; }
+  }
+
+  // Record the realized increment as the next substep's warm-start seed —
+  // but only if Newton converged, so we never extrapolate from garbage.
+  if(converged){
+    const prevDTheta    = rope.prevDTheta;
+    const prevDThetaDot = rope.prevDThetaDot;
+    for(let i = 0; i < Ns; i++){
+      prevDTheta[i]    = thetaNew[i]    - thetaN[i];
+      prevDThetaDot[i] = thetaDotNew[i] - thetaDotN[i];
+    }
+    rope.warmStartValid = true;
+  } else {
+    rope.warmStartValid = false;
   }
 
   theta.set(thetaNew);
@@ -1157,11 +1294,36 @@ export function update(dt){
         rk4Step(rope, h_sub, ax, ay);
       }
     }
-    if(NEWTON_LOG_ENABLED && isImplicit){
-      const itersStr = newtonItersArr.join(',');
-      const relStr   = newtonRelArr.map(r => Number.isFinite(r) ? r.toExponential(2) : String(r)).join(',');
-      console.log(`[Newton N=${rope.N}] iters=[${itersStr}] relStep=[${relStr}] converged=${newtonConvCount}/${substeps} (${INTEGRATOR})`);
+    if(NEWTON_LOG_ENABLED && isImplicit && anchorHasInteracted){
+      // Only print problem frames: a substep failed to converge, or one
+      // strained close to the iteration cap (run-up to a failure).  Healthy
+      // frames (all converged in few iters) stay silent so the failure
+      // moment isn't buried under thousands of identical lines.
+      const maxIters = newtonItersArr.reduce((a, b) => Math.max(a, b ?? 0), 0);
+      const NEWTON_NEAR_FAIL_ITERS = NEWTON_MAX_ITERS - 2;   // 6 of 8 = straining
+      if(newtonConvCount < substeps || maxIters >= NEWTON_NEAR_FAIL_ITERS){
+        const itersStr = newtonItersArr.join(',');
+        const relStr   = newtonRelArr.map(r => Number.isFinite(r) ? r.toExponential(2) : String(r)).join(',');
+        console.log(`[Newton N=${rope.N}] iters=[${itersStr}] relStep=[${relStr}] converged=${newtonConvCount}/${substeps} (${INTEGRATOR})`);
+      }
       newtonConvCount = 0;
+    }
+    // Per-frame θ samples at three fixed joint indices.  Recording starts
+    // on first anchor interaction so frame 0 isn't a flood of all-zero rows.
+    if(THETA_LOG_ENABLED && anchorHasInteracted && rope === ropes[0]){
+      const Ns = rope.Ns;
+      const iL = THETA_LOG_I_LEFT, iM = THETA_LOG_I_MID, iR = THETA_LOG_I_RIGHT;
+      if(iL < Ns && iM < Ns && iR < Ns){
+        thetaLogTimeSec += h;
+        thetaLogRows.push([
+          thetaLogFrameCount,
+          thetaLogTimeSec,
+          rope.theta[iL],
+          rope.theta[iM],
+          rope.theta[iR],
+        ]);
+        thetaLogFrameCount++;
+      }
     }
     if(CONDITION_ESTIMATE) estimateConditionNumber(rope);
     if(ENERGY_MONITOR){
@@ -1303,6 +1465,7 @@ document.getElementById('resetDisk')?.addEventListener('click', () => {
   for(const rope of ropes){
     rope.theta.fill(0);
     rope.thetaDot.fill(0);
+    rope.warmStartValid = false;
     rope.E = 0;
     rope.prevE = 0;
     rope.maxThetaDot     = 0;
@@ -1328,4 +1491,9 @@ document.getElementById('resetDisk')?.addEventListener('click', () => {
   // Re-arm substep log (any unsaved rows are discarded; user should call
   // window.alex2.dumpSubstepLog() first if they want to keep them).
   substepLogRows.length = 0;
+  // Re-arm θ log (any unsaved rows are discarded; user should call
+  // window.alex2.dumpThetaLog() first if they want to keep them).
+  thetaLogRows.length = 0;
+  thetaLogFrameCount  = 0;
+  thetaLogTimeSec     = 0;
 });

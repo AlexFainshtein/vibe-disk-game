@@ -86,3 +86,10 @@ public/
 /Alex2/Debug.ods
 /Alex2/alex2-substep-*.xlsx
 /Alex2/.~lock.alex2-substep-*.xlsx#
+# Alex2 diagnostic CSV/spreadsheet dumps (theta / delta / full-state / input logs)
+/Alex2/alex2-theta-*
+/Alex2/alex2-delta-*
+/Alex2/alex2-state-*
+/Alex2/alex2-input-*
+# Alex2 chat/reference scratch docs
+/Alex2/chat2 - Equations.md
