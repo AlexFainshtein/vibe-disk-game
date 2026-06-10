@@ -1,4 +1,4 @@
-import { canvas, inputHooks, renderExtras } from '../state.js';
+import { canvas, inputHooks, renderExtras, renderOverlays } from '../state.js';
 import { disk, bar, setDiskRadiusFraction } from '../playfield.js';
 
 // Alex2: chain dynamics via REDUCED COORDINATES.
@@ -33,7 +33,7 @@ bar.hidden = true;
 inputHooks.diskGrab = false;
 setDiskRadiusFraction(0);
 
-const N = 100;
+const N = 50;
 const ROPE_LENGTH_FRACTION = 0.45;
 
 // Total chain mass (excluding anchor). Distributed uniformly across the
@@ -99,7 +99,7 @@ const DAMPING_MASS = 0.1; // was 0
 // per-substep Newton iteration; only the residual definition and the
 // Jacobian's h-coefficient differ.
 const INTEGRATOR                     = 'implicit-midpoint';
-const IMPLICIT_SUBSTEPS_PER_FRAME    = 32; // 16 is not robust enough for N=100 at BENDING_EI=1; 32 is, with some room to spare. 64 is overkill.
+const IMPLICIT_SUBSTEPS_PER_FRAME    = 16; // At N=50 (current default), 16 runs unclamped real-time and holds for normal play; only deliberate hard jerks that push the frame into the dt-clamp still blow up (see CLAUDE-ALEX2.md). At N=100 this needed 32.
 const NEWTON_MAX_ITERS               = 8;
 // Warm-start: seed each substep's Newton iteration from the previous
 // substep's realized increment (linear extrapolation y⁰ = yₙ + Δy_prev)
@@ -114,7 +114,7 @@ const NEWTON_WARM_START              = true;
 const NEWTON_TOL                     = 1e-6;
 // Diagnostic: when true, log a one-line summary per frame showing how
 // each substep's Newton iteration went.
-const NEWTON_LOG_ENABLED             = true;
+const NEWTON_LOG_ENABLED             = false;
 
 // --- Energy monitoring (diagnostic) ------------------------------------
 //
@@ -122,7 +122,7 @@ const NEWTON_LOG_ENABLED             = true;
 // system this is exactly conserved (Noether); with damping it must
 // monotonically decrease. Anything else — sudden spikes, NaN, runaway
 // growth — is a numerical-stability problem we want to catch in the act.
-const ENERGY_MONITOR  = true;     // off — no console spam during this test
+const ENERGY_MONITOR  = false;     // off — no console spam during this test
 const E_SPIKE_RATIO   = 100;       // log when E_new / E_prev exceeds this
 
 // --- Trace mode (diagnostic) ------------------------------------------
@@ -166,6 +166,24 @@ const THETA_LOG_ENABLED         = false;
 const THETA_LOG_I_LEFT          = 1;
 const THETA_LOG_I_MID           = 6;
 const THETA_LOG_I_RIGHT         = 11;
+
+// --- Performance HUD (diagnostic) -------------------------------------
+//
+// SHOW_PERF_HUD: draw an on-canvas overlay (top-left) with the three
+// numbers needed to compare devices and read the real frame budget:
+//   • achieved FPS + real frame interval (ms), measured from the wall-clock
+//     gap between successive update() calls — independent of the dt clamp.
+//   • physics ms/frame — wall-clock time spent in the integrator substep
+//     loop only (excludes the diagnostic monitors). This IS the budget
+//     number: at 60 Hz you have 16.7 ms total; physics/frame says how much
+//     of it the chain eats.
+//   • raw dt fed to the loop + a CLAMPED flag when main.js's 33 ms ceiling
+//     fired (real interval > 33 ms → physics ran in slow motion). Desktop
+//     pinned at CLAMPED while the phone isn't = the cross-device hypothesis
+//     confirmed.
+// On-canvas (not console) so it reads identically on desktop and phone with
+// the two devices held side by side.
+const SHOW_PERF_HUD = true;
 
 // --- Rope factory ------------------------------------------------------
 
@@ -448,6 +466,15 @@ const substepLogRows   = [];   // each row: [frame, substep, rhs_0..H, ddt_0..H]
 const thetaLogRows     = [];   // each row: [frame, t_sec, theta_left, theta_mid, theta_right]
 let   thetaLogFrameCount = 0;
 let   thetaLogTimeSec    = 0;  // cumulative wall-clock time since logging started
+
+// --- Performance HUD state (smoothed via EMA) -------------------------
+let _perfLastFrameT = 0;      // performance.now() at the previous update() entry
+let _perfFrameMs    = 0;      // smoothed real frame interval (ms) → FPS = 1000/this
+let _perfPhysicsMs  = 0;      // smoothed integrator-only compute (ms)
+let _perfRawDtMs    = 0;      // dt actually handed to update() this frame (ms)
+let _perfClamped    = false;  // did dt hit main.js's 33 ms ceiling this frame
+let _perfSubsteps   = 0;      // substeps taken this frame (for the HUD readout)
+const _PERF_EMA     = 0.1;    // smoothing factor for the two timing readouts
 
 // --- Anchor state (shared across both ropes) ---------------------------
 
@@ -1214,6 +1241,22 @@ export function update(dt){
   const h = dt;
   if(h <= 0) return;
 
+  // Perf HUD: measure the real wall-clock gap between update() calls (the
+  // true frame interval, independent of the dt clamp), and record the dt we
+  // were actually handed plus whether it was clamped. dt = min(0.033, real),
+  // so dt ≥ 0.033 ⇔ the real interval exceeded 33 ms and physics is running
+  // in slow motion.
+  if(SHOW_PERF_HUD){
+    const now = performance.now();
+    if(_perfLastFrameT > 0){
+      const interval = now - _perfLastFrameT;
+      _perfFrameMs += (interval - _perfFrameMs) * _PERF_EMA;
+    }
+    _perfLastFrameT = now;
+    _perfRawDtMs = dt * 1000;
+    _perfClamped = dt >= 0.033;
+  }
+
   // ax, ay are the anchor's smoothed acceleration over this frame, fed to
   // Q_anchor inside the RK4 evaluations.  For the mouse-drag path we use
   // this smooth delivery instead of an instantaneous Δv impulse — same
@@ -1275,6 +1318,11 @@ export function update(dt){
   const isImplicit = gamma !== null;
   const substeps = isImplicit ? IMPLICIT_SUBSTEPS_PER_FRAME : RK4_SUBSTEPS_PER_FRAME;
   const h_sub    = h / substeps;
+  _perfSubsteps  = substeps;
+  // Accumulates wall-clock time spent purely in the integrator substep loop
+  // (the diagnostic monitors below are excluded so this reads as the
+  // shippable physics cost). EMA-folded into _perfPhysicsMs after the loop.
+  let _physMsThisFrame = 0;
   // Per-frame Newton log, only used when NEWTON_LOG_ENABLED.  Captures
   // (iters, relStep, converged) for every substep across every rope so we
   // can spot Newton failures or near-failures.
@@ -1282,6 +1330,7 @@ export function update(dt){
   const newtonRelArr     = NEWTON_LOG_ENABLED ? new Array(substeps) : null;
   let   newtonConvCount  = 0;
   for(const rope of ropes){
+    const _physT0 = SHOW_PERF_HUD ? performance.now() : 0;
     for(let s = 0; s < substeps; s++){
       if(isImplicit){
         implicitStep(rope, h_sub, ax, ay, gamma);
@@ -1294,6 +1343,7 @@ export function update(dt){
         rk4Step(rope, h_sub, ax, ay);
       }
     }
+    if(SHOW_PERF_HUD) _physMsThisFrame += performance.now() - _physT0;
     if(NEWTON_LOG_ENABLED && isImplicit && anchorHasInteracted){
       // Only print problem frames: a substep failed to converge, or one
       // strained close to the iteration cap (run-up to a failure).  Healthy
@@ -1346,6 +1396,10 @@ export function update(dt){
       }
     }
     updateParticlePositions(rope);
+  }
+
+  if(SHOW_PERF_HUD){
+    _perfPhysicsMs += (_physMsThisFrame - _perfPhysicsMs) * _PERF_EMA;
   }
 
   // Trace logging: three lines per frame per rope — a header with frame
@@ -1450,6 +1504,40 @@ function drawEndpoints(ctx){
 
 renderExtras.push(drawEndpoints);
 renderExtras.push(drawRopeSegments);
+
+// Performance HUD — drawn as an overlay (on top of the rope) so it's always
+// legible. Reads the smoothed module-level perf state captured in update().
+function drawPerfHud(ctx){
+  if(!SHOW_PERF_HUD) return;
+  const fps     = _perfFrameMs > 0 ? 1000 / _perfFrameMs : 0;
+  // Fraction of each real frame spent in physics. Near 100% → physics is the
+  // bottleneck; well below → render/vsync is the limiter, not the chain.
+  const physPct = _perfFrameMs > 0 ? (_perfPhysicsMs / _perfFrameMs) * 100 : 0;
+  const lines = [
+    `${fps.toFixed(0)} fps   ${_perfFrameMs.toFixed(1)} ms/frame`,
+    `physics ${_perfPhysicsMs.toFixed(1)} ms   (${physPct.toFixed(0)}% of frame)`,
+    `dt ${_perfRawDtMs.toFixed(1)} ms${_perfClamped ? '   ⚠ CLAMPED@33' : ''}`,
+    `N=${N}  substeps=${_perfSubsteps}  ${INTEGRATOR}`,
+  ];
+
+  ctx.save();
+  ctx.font = '13px ui-monospace, "SF Mono", Menlo, Consolas, monospace';
+  ctx.textBaseline = 'top';
+  ctx.textAlign = 'left';
+  const pad = 8, lh = 18;
+  let maxW = 0;
+  for(const s of lines) maxW = Math.max(maxW, ctx.measureText(s).width);
+  // Background panel for legibility over the multicolored rope.
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+  ctx.fillRect(8, 8, maxW + pad * 2, lines.length * lh + pad * 2);
+  for(let i = 0; i < lines.length; i++){
+    // Clamp line in amber as a visual alarm.
+    ctx.fillStyle = (i === 2 && _perfClamped) ? '#e8b84b' : 'rgba(235, 242, 248, 0.92)';
+    ctx.fillText(lines[i], 8 + pad, 8 + pad + i * lh);
+  }
+  ctx.restore();
+}
+renderOverlays.push(drawPerfHud);
 
 // Initialize particle positions so the chain is visible before update() runs.
 for(const rope of ropes) updateParticlePositions(rope);
