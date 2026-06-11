@@ -10,13 +10,20 @@ Alex2 is the second of Alex's chain experiments. The first variant (see git hist
 
 ## What Alex2 is
 
-Drag the small anchor dot to whip the chain around. The chain hangs from the anchor; all motion in the chain comes from anchor motion plus the chain's own dynamics (no gravity in this variant — that's an obvious add-on, deliberately left off so the dynamics tester sees only the spring/Coriolis/bending behavior).
+Grab the big **handle** and whip the chain around. The handle drives a **spring**, the spring drives the **anchor** (the chain head), and the chain hangs off the anchor under **gravity**. The chain starts hanging straight down; the handle starts above the anchor.
 
 A single chain is drawn by default (`N = 50`; was 100 — see the perf note in Known limitations). The factory `makeRope` and the array-of-ropes structure are kept so the variant can be extended to a multi-rope comparison view (e.g. N=50 vs N=100, same anchor input) by pushing additional `makeRope(...)` calls into the `ropes` array — useful for verifying N-invariance after future integrator changes.
 
 Input:
-- **Mouse drag** on the anchor dot — smooth continuous driving.
+- **Mouse drag on the handle** — spring mode (the shipping control). The finger moves the handle; the anchor is a spring-mass-damper that chases it. The handle has **no L/R clamp** — drag it off one side and it wraps to the other; grab detection is wrap-aware so it's never lost. Released, the handle **stays where you left it** (it has no gravity — it's the control point). Vertically it's clamped on-screen (no vertical wrap).
+- **Mouse drag on the small anchor dot** — direct mode (testing): the finger pins the anchor rigidly, bypassing the spring. This re-exposes the hard-jerk blow-up, so it's a test handle only, not for the end user.
 - **Arrow keys** — bounded velocity impulse (`ANCHOR_KEY_VELOCITY_STEP` px/s per press) delivered as an instantaneous angular-momentum kick to the chain.
+
+### Mouse→anchor spring, handle, gravity, wrap
+
+- **Spring (low-pass on the forcing).** The anchor's acceleration fed to `Q_anchor` is the spring force / mass — `K·stretch`, a function of *displacement*, not `Δv/h`. So a fast jerk or a clamped (slow) frame can't manufacture a huge `ax` the way the old finger-pinned anchor could. This is what turned the irrecoverable hard-jerk NaN into a *recoverable* transient (a brief Newton-struggle / fps dip that self-heals). Constants: `SPRING_K`, `SPRING_DAMP`, `ANCHOR_MASS`, `SPRING_REST_FRAC`. Direct anchor mode keeps the old `ax = Δv/h` path for testing.
+- **Gravity** (`GRAVITY`, px/s²; 0 disables). Acts on the chain as a generalized force `Q_grav_j = g·L·μ_jj·cos θ_j` (so θ=π/2 / straight-down is the equilibrium) and on the anchor body (`ay += g`). It does **not** act on the spring or handle (kinematic control elements). Added to `buildRhs` *and* its θ-derivative to the Newton Jacobian in `buildJacobianBlocks`, so the implicit solve stays consistent. Equivalence-principle-consistent: if the anchor free-falls, `Q_anchor`'s `−cos θ_j·ay` cancels `Q_grav`, so a free-falling chain doesn't spuriously deform.
+- **Toroidal wrap — horizontal only** (`USE_CHAIN_WRAP`). The whole movable scene (chain + spring + anchor dot + handle) is drawn once per needed canvas shift via `ctx.translate`, letting the canvas clip — uniform across all elements, no per-element math. Only L↔R; vertical wrap is deliberately off because with gravity the chain hangs down and a fallen chain teleporting to the top reads badly. The wrap test includes the handle's radius so the opposite-side image doesn't flicker. Drop the height term back in `drawAlex2` to re-enable full wrap.
 
 ## Physics model
 
@@ -72,17 +79,27 @@ Arrow-key kicks bypass this entirely: they apply an exact angular-momentum impul
 | Constant | Default | Role |
 |---|---|---|
 | `N` | 50 | Number of particles in the chain (joints = N − 1); cut from 100 for real-time framerate |
-| `ROPE_LENGTH_FRACTION` | 0.45 | Chain's total length as a fraction of canvas width |
+| `ROPE_LENGTH_FRACTION` / `_H` | 0.45 / 0.3 | Chain length = `max(0.45·width, 0.3·height)` (height term keeps it long enough on narrow screens) |
+| `INITIAL_THETA` | π/2 | Initial joint angle — straight down (gravity equilibrium) |
 | `M_ROPE` | 1 | Total chain mass (excluding anchor) |
+| `GRAVITY` | 1000 | Downward accel (px/s²) on the chain + anchor; 0 disables |
 | `INTEGRATOR` | `'implicit-midpoint'` | Active integrator: `'implicit-midpoint'` (γ=0.5), `'implicit-euler'` (γ=1.0), or legacy `'rk4'` |
 | `IMPLICIT_SUBSTEPS_PER_FRAME` | 16 | Implicit substeps per real frame; 16 holds at N=50 for normal play (was 32 at N=100) |
 | `NEWTON_WARM_START` | true | Seed Newton from previous substep's increment vs. explicit Euler (see Integration) |
 | `NEWTON_MAX_ITERS` / `NEWTON_TOL` | 8 / 1e-6 | Per-substep Newton iteration cap and convergence tolerance |
 | `RK4_SUBSTEPS_PER_FRAME` | 16 | Substeps for the legacy RK4 path only |
 | `ANCHOR_KEY_VELOCITY_STEP` | 50 px/s | Arrow-key impulse magnitude |
-| `BENDING_EI` | 100 | Continuum flexural rigidity; `k_θ = BENDING_EI / L` |
-| `DAMPING_BEND` | 1 | Strain-rate (discrete Laplacian on θ̇) damping coefficient |
-| `DAMPING_MASS` | 0.1 | Mass-proportional damping coefficient |
+| `BENDING_EI` | 1 | Continuum flexural rigidity; `k_θ = BENDING_EI / L` |
+| `DAMPING_BEND` | 1000 | Strain-rate (discrete Laplacian on θ̇) damping coefficient |
+| `DAMPING_MASS` | 0.5 | Mass-proportional damping coefficient (only thing that damps bulk rotation) |
+| `USE_ANCHOR_SPRING` | true | Mouse→anchor spring + handle (the shipping control) |
+| `SPRING_K` | 800 | Spring stiffness (higher = more precise/rigid control, less low-pass filtering) |
+| `SPRING_DAMP` | 25 | Damping on the anchor's velocity (≈ near-critical scales as √(K·mass)) |
+| `ANCHOR_MASS` | 2 | Anchor inertia; bigger = smoother/laggier, smaller `ax` |
+| `SPRING_REST_FRAC` | 0.16 | Spring rest length as a fraction of min(w,h) — the idle handle offset |
+| `HANDLE_GRAB_RADIUS_FRAC` | 1/6 | Handle finger hit-target (big, for narrow screens) |
+| `HANDLE_MARKER_RADIUS_FRAC` | 1/15 | Drawn handle radius |
+| `USE_CHAIN_WRAP` | true | Horizontal-only toroidal wrap of the whole scene |
 
 ### Diagnostic flags (flip individually to investigate)
 
@@ -105,22 +122,26 @@ Most outputs go to the console; the θ / substep / input logs download as CSV (s
 - **Performance & the N=50 / 16-substep cut (2026-06-10)** — the per-substep Newton solve (O(N³) × iters × substeps) dominates the frame. At the old N=100 / 32 it ran ~10–20 fps, *below* 30 fps even at rest, so main.js's 33 ms dt-clamp fired permanently → physics ran in slow motion, and the slow-motion rate differed by device (phone advanced more physics-time/sec than the slower desktop) — that, not a physics difference, was why the chain "felt different" across devices. Cutting to **N=50 (≈5× via O(N³)) + 16 substeps (≈2×)** put both devices unclamped at real-time (~60 fps phone / ~75 fps desktop, ~60% physics at rest, ~97% under hard drive). The cross-device feel converged the moment the clamp cleared. Reducing damping for a livelier feel will lower the blow-up threshold (faster motion → larger θ̈) — liveliness and stability trade off.
 - **Blow-up at N=50 / 16 is gated by the dt-clamp (2026-06-10)** — under *deliberate* hard jerks (rare in normal play) the chain still NaNs, and the blow-up coincides exactly with the clamp re-appearing. Causal chain: hard jerk → Newton iters spike → frame slows past 33 ms → clamp fires → smooth-delivery `ax = Δanchor / h` is computed with `h` pinned at 33 ms while the real frame was longer → the delivered anchor acceleration is **inflated** → larger θ̈ → Newton overshoots its basin → blow-up. So a slow frame manufactures an artificial forcing spike; the clamp *feeds* the explosion rather than protecting against it. Both planned fixes attack this — the mouse→anchor spring bounds `ax` at the source, and a fixed-timestep accumulator would remove the clamp-inflation entirely.
 - **Long-persistent "chaos"** at default damping — brief mouse inputs can trigger a regime where the chain keeps moving for *much longer* than the mass-damping time-constant (~10 sec at `α = 0.1`) would predict. This is a *separate* phenomenon from the blow-up above and is most likely **genuine bounded Hamiltonian chaos** (an N−1 link chain is a generalized multi-pendulum with positive Lyapunov exponents), not a numerical artifact — sensitive, energy-conserving wandering that only decays on the slow damping timescale. Higher damping suppresses it at the cost of sluggish feel; not further pursued.
-- **No gravity / no friction / no collisions** — by design. The point is to stress-test the integrator and bending, not to build a complete sandbox.
+- **Spring made the blow-up recoverable, not impossible (2026-06-10)** — with the mouse→anchor spring in place, a hard jerk still spikes Newton (fps dips to ~5, then climbs back) but no longer NaNs permanently: the spring removed the clamp-inflation feedback, so the solver re-converges and it self-heals. *Residual:* an **involuntary** hand jerk is sharper than a deliberate one and can still trigger a chaos episode; sometimes it plateaus at a sustained ~22 fps (Newton chronically near its iter cap, energy injection ≈ damping removal) rather than fully recovering. An anti-chaos mechanism is the next planned fix (deliberately deferred so it doesn't mask the raw behavior).
+- **No friction / no collisions; gravity is now on** — gravity was added (chain + anchor; see "What Alex2 is"). Friction and self/wall collisions are still out by design — physically-correct chain-floor collision in reduced coordinates is a large separate project; for now the chain may pass off-screen (the wrap is horizontal-only, so it doesn't reappear at the top).
 
 ## Future directions
 
-The next phase targets **feel and input-limiting**, not integrator robustness. Per project direction we are explicitly **not** pursuing smaller h, adaptive step-rejection, or line-search Newton — the blow-up is understood and warm-start + N=50 / 16 substeps handles normal play; the open problems are the residual hard-jerk blow-up (above) and feel.
+The next phase targets **feel and input-limiting**, not integrator robustness. Per project direction we are explicitly **not** pursuing smaller h, adaptive step-rejection, or line-search Newton.
 
-- **Mouse→anchor spring (active next step)** — connect the anchor to the mouse target by a spring+damper instead of pinning it to the cursor. This is a *physical low-pass filter* on the forcing: fast jerks become a **bounded anchor acceleration**, so `ax` (hence θ̈, hence the Newton-basin overshoot) is capped at the source. It (a) attacks the residual blow-up cause directly (the inflated-`ax`-on-a-clamped-frame mechanism in Known limitations), (b) removes the Newton-iter spike that pushes physics to ~97% of frame under hard drive, and (c) adds a weighty, springy fidget feel. The 16-substep / N=50 cut is already in place; the spring is what makes 16 safe under deliberate abuse.
-- **Breakable rope** — the inverse idea: instead of preventing the stiff regime, let a joint *tear* when its θ̈ exceeds a limit. Embraces the failure as a game mechanic rather than suppressing it.
-- **Performance** — the dense O(N³) solve per Newton iter dominates. A banded/sparse solver (M and the Jacobian are nearly banded for a chain) could cut this substantially if N=100 at full frame rate is wanted.
+- **Mouse→anchor spring — DONE (2026-06-10).** Implemented as the shipping control (see "What Alex2 is"). It bounds `ax` at the source and turned the irrecoverable NaN into a recoverable transient. Open follow-up: a stiffer `SPRING_K` (set for control feel) passes jerks through more directly — less low-pass filtering — so it trades against blow-up margin.
+- **Anti-chaos mechanism (next)** — the user has an idea, deferred so it doesn't mask the current raw behavior. Targets the residual involuntary-jerk chaos / 22 fps plateau (Known limitations).
+- **Tune the fraction "scale" (parked)** — the size-fractions (handle radii, spring rest, etc.) are computed off `min(w,h)` and were set provisionally; the reference scale and the numbers are to be revisited together.
+- **Wrap the spring/handle visual edge cases (parked)** — currently fine for the horizontal wrap; revisit if a tethered element reads badly crossing a seam.
+- **Breakable rope** — let a joint *tear* when its θ̈ exceeds a limit; embraces the failure as a mechanic.
+- **Performance** — the dense O(N³) solve per Newton iter dominates. Note the reduced-coordinate **mass matrix M is dense, not banded** (the lumped-mass `μ` couples every joint pair), so a banded solver does *not* apply directly; the real O(N) lever for a chain is the articulated-body / Featherstone recursion, which never forms M — a larger reformulation.
 
 Earlier integrator notes, now resolved or shelved: implicit midpoint (the old "B3") is **implemented and is the default**; symplectic Verlet/Yoshida ("B4") is still explicit with the same θ̈·h² sensitivity and is not pursued.
 
 ## Sizing
 
-Chain length is `canvas.width * ROPE_LENGTH_FRACTION`; segment length `L = (canvas.width · ROPE_LENGTH_FRACTION) / (N − 1)`. Anchor marker radius `ANCHOR_MARKER_RADIUS_FRAC` (visible dot) and grab radius `ANCHOR_GRAB_RADIUS_FRAC` (touch target) are fractions of the canvas dimension.
+Chain length is `max(width·ROPE_LENGTH_FRACTION, height·ROPE_LENGTH_FRACTION_H)`; segment length `L = chainLength / (N − 1)`. Anchor marker/grab radii (`ANCHOR_MARKER_RADIUS_FRAC`, `ANCHOR_GRAB_RADIUS_FRAC`) and handle marker/grab radii (`HANDLE_MARKER_RADIUS_FRAC`, `HANDLE_GRAB_RADIUS_FRAC`) are fractions of `min(w,h)`. (These fractions are provisional — see Future directions.)
 
 ## Reset behavior
 
-The Reset button (handler in [controls.js](controls.js)) resets the anchor to its initial position and zeros all `θ` and `θ̇`. Tracing/logging buffers also restart so a Reset gives clean repeatable runs.
+The Reset button (handler in [controls.js](controls.js)) resets the anchor to its initial position, parks the handle above the anchor, releases any held grab, and zeros all `θ` and `θ̇` (chain back to straight-down). Tracing/logging buffers also restart so a Reset gives clean repeatable runs.

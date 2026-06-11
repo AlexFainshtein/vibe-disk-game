@@ -34,7 +34,16 @@ inputHooks.diskGrab = false;
 setDiskRadiusFraction(0);
 
 const N = 50;
-const ROPE_LENGTH_FRACTION = 0.45;
+// Chain total length = max(ROPE_LENGTH_FRACTION·width, ROPE_LENGTH_FRACTION_H·height).
+// The height term keeps the chain a useful length on narrow/tall screens
+// (e.g. a folded foldable) where width alone makes it too short.
+const ROPE_LENGTH_FRACTION   = 0.45;   // of canvas width
+const ROPE_LENGTH_FRACTION_H = 0.3;    // of canvas height
+
+// Initial chain orientation (all joints equal → straight, no bending force).
+// π/2 = straight down: on a narrow screen a horizontal chain runs off-frame,
+// and "hanging down" is the natural rest pose (and matches gravity, later).
+const INITIAL_THETA = Math.PI / 2;
 
 // Total chain mass (excluding anchor). Distributed uniformly across the
 // N−1 non-anchor particles. Combined with the Lagrangian formulation,
@@ -59,6 +68,39 @@ const ANCHOR_COLOR = '#555555'; // was 88c0d0
 // One arrow-key press changes anchor velocity by this much (px / s). The
 // resulting angular-momentum impulse is applied directly to the chain.
 const ANCHOR_KEY_VELOCITY_STEP = 50;
+
+// --- Mouse→anchor spring + handle -------------------------------------
+//
+// Instead of pinning the anchor to the finger, the finger drives a big
+// HANDLE; the anchor is a spring-mass-damper that chases the handle. The
+// anchor acceleration fed to Q_anchor is then the spring force / mass —
+// bounded by the *stretch* (a physical distance), NOT by Δv/h. That breaks
+// the clamp-inflation blow-up (a slow frame can no longer manufacture a
+// huge ax) and acts as a physical low-pass filter on hard jerks.
+//
+// Two grab targets (dual-touch):
+//   • HANDLE (big, easy) → spring mode: filtered, the shipping control.
+//   • ANCHOR (small, precise) → direct mode: rigid pin, for testing tight
+//     control. Direct mode bypasses the spring, so it re-exposes the
+//     blow-up — testing only, not exposed to the end user.
+const USE_ANCHOR_SPRING       = true;
+const SPRING_K                = 800; // was 400  // stiffness (px/s² per px of stretch, per unit anchor mass)
+const SPRING_DAMP             = 25; // damping on anchor velocity (≈ near-critical at K=200, m=2)
+const ANCHOR_MASS             = 2;      // anchor inertia; bigger = smoother/laggier, smaller ax
+const SPRING_REST_FRAC        = 0.16;   // spring rest length as a fraction of min(canvas w,h) — the idle handle offset below the anchor
+const HANDLE_GRAB_RADIUS_FRAC = 1 / 6; // finger hit target for the handle (big, for narrow screens)
+const HANDLE_MARKER_RADIUS_FRAC = 1 / 15; // drawn handle radius
+const HANDLE_COLOR            = 'rgba(136, 192, 208, 0.55)'; // semi-transparent so the string shows through
+const SPRING_COIL_COLOR       = 'rgba(160, 170, 180, 0.7)';
+const SPRING_COIL_TURNS       = 8;      // zigzag turns drawn between anchor and handle
+const SPRING_COIL_AMPLITUDE_FRAC = 1 / 90; // coil width as a fraction of min(canvas w,h)
+
+// Toroidal wrap: the part of the chain that leaves the frame reappears on the
+// opposite edge. Purely visual (no collisions in this variant) — the renderer
+// draws edge-crossing copies of the chain shifted by ±canvas. The anchor is
+// clamped inside the canvas, so its particle positions stay near-frame and a
+// single ±w/±h shift covers the overflow.
+const USE_CHAIN_WRAP = true;
 
 // Bending stiffness. Per-joint angular spring constant k_θ = BENDING_EI / L.
 // BENDING_EI is the continuum flexural rigidity (N-invariant material
@@ -87,8 +129,18 @@ const DAMPING_BEND = 1000;
 // frame, so the time constant of every mode decays at rate α regardless of
 // frequency. Use to slowly bleed off rotation / bulk motion. 0 means the
 // chain coasts indefinitely (only DAMPING_BEND dissipates).
-const DAMPING_MASS = 0.1; // was 0
+const DAMPING_MASS = 0.5; // was 0.1, 0
 
+// --- Gravity -----------------------------------------------------------
+//
+// Downward (+y) acceleration in px/s². Acts on the chain (as a generalized
+// force Q_grav_j = g·L·μ_jj·cos θ_j, so straight-down θ=π/2 is the
+// equilibrium) and on the anchor body (adds g to its ay). It does NOT act on
+// the spring or the handle — those are kinematic control elements.
+// Equivalence-principle check: if the anchor free-falls (ay=g), Q_anchor's
+// −cos θ_j·ay exactly cancels Q_grav, so a free-falling chain doesn't deform.
+// Set to 0 to disable. Tunable for feel.
+const GRAVITY = 1000;
 // --- Implicit integrators (experimental, B3 in our discussion) --------
 //
 // INTEGRATOR: 'rk4' (explicit, the old default), 'implicit-midpoint'
@@ -192,7 +244,8 @@ const SHOW_PERF_HUD = true;
 // (same L, same m), while keeping a tractable number of joints.
 function makeRope(N, baseX, baseY, opts = {}){
   const Ns = N - 1;                                      // number of segments / angles
-  const segmentLength = opts.segmentLength ?? (canvas.width * ROPE_LENGTH_FRACTION) / Ns;
+  const chainLength   = Math.max(canvas.width * ROPE_LENGTH_FRACTION, canvas.height * ROPE_LENGTH_FRACTION_H);
+  const segmentLength = opts.segmentLength ?? chainLength / Ns;
   const particleMass  = opts.particleMass  ?? M_ROPE / Ns;
   // μ_{jk} = Σ_{i ≥ max(j,k)} m_i  with uniform mass.
   // For uniform mass this is (Ns − max(j,k)) · particleMass when we index
@@ -297,6 +350,7 @@ function makeRope(N, baseX, baseY, opts = {}){
 }
 
 const ropes = [makeRope(N, canvas.width / 2, canvas.height * 0.5)];
+for(const rope of ropes) rope.theta.fill(INITIAL_THETA);   // hang straight down at start
 
 // --- Input-log CSV download -------------------------------------------
 
@@ -488,19 +542,34 @@ let anchorVy = 0;
 let prevAnchorDeltaX = 0;
 let prevAnchorDeltaY = 0;
 
-// Touch / drag input
-let anchorHeld   = false;
+// Handle: the finger-driven grab target. Its position is its own delta from
+// the rope base; idle it rides at the spring rest length below the anchor.
+let handleDeltaX = 0;
+let handleDeltaY = 0;
+
+// Touch / drag input. Only one of anchorHeld / handleHeld is true at a time.
+let anchorHeld   = false;   // direct mode: finger pins the anchor (testing)
+let handleHeld   = false;   // spring mode: finger drives the handle (shipping)
 let grabOffsetX  = 0;
 let grabOffsetY  = 0;
 let grabBaseX    = 0;
 let grabBaseY    = 0;
 
+// Spring rest length in px (recomputed from canvas each use — survives resize).
+function springRestLength(){
+  return Math.min(canvas.width, canvas.height) * SPRING_REST_FRAC;
+}
+
 inputHooks.emptyDown = (x, y) => {
-  const grabR = Math.min(canvas.width, canvas.height) * ANCHOR_GRAB_RADIUS_FRAC;
+  const anchorR = Math.min(canvas.width, canvas.height) * ANCHOR_GRAB_RADIUS_FRAC;
+  const handleR = Math.min(canvas.width, canvas.height) * HANDLE_GRAB_RADIUS_FRAC;
   for(const rope of ropes){
     const ax = rope.baseX + anchorDeltaX;
     const ay = rope.baseY + anchorDeltaY;
-    if(Math.hypot(x - ax, y - ay) <= grabR){
+    // Check the precise anchor target first (direct test mode), then the big
+    // handle target (spring mode). With the spring disabled, only the anchor
+    // is grabbable and behaves as before.
+    if(Math.hypot(x - ax, y - ay) <= anchorR){
       grabOffsetX = ax - x;
       grabOffsetY = ay - y;
       grabBaseX   = rope.baseX;
@@ -508,19 +577,52 @@ inputHooks.emptyDown = (x, y) => {
       anchorHeld  = true;
       return true;
     }
+    if(USE_ANCHOR_SPRING){
+      // Wrap-aware: the handle has no L/R clamp, so its true center may be
+      // off-screen while a wrapped image is on-screen. Find the horizontal
+      // image (true center shifted by k·width) nearest the finger; if the tap
+      // lands on it, rebase the true center onto that image so the handle
+      // comes back on-screen and stays grabbable.
+      const w  = canvas.width;
+      const hx = rope.baseX + handleDeltaX;
+      const hy = rope.baseY + handleDeltaY;
+      const k  = Math.round((x - hx) / w);
+      const imageX = hx + k * w;
+      if(Math.hypot(x - imageX, y - hy) <= handleR){
+        // Rebase the WHOLE movable system by the same k·width — handle AND
+        // anchor (the chain follows the anchor). Shifting both keeps the
+        // spring stretch and all geometry identical, so grabbing the wrapped
+        // image causes no jerk; the chain's true position just lands where
+        // its wrap image already was.
+        handleDeltaX     += k * w;
+        anchorDeltaX     += k * w;
+        prevAnchorDeltaX += k * w;
+        grabOffsetX = imageX - x;
+        grabOffsetY = hy - y;
+        grabBaseX   = rope.baseX;
+        grabBaseY   = rope.baseY;
+        handleHeld  = true;
+        return true;
+      }
+    }
   }
   return false;
 };
 inputHooks.emptyMove = (x, y) => {
-  if(!anchorHeld) return;
-  anchorDeltaX = (x + grabOffsetX) - grabBaseX;
-  anchorDeltaY = (y + grabOffsetY) - grabBaseY;
+  if(anchorHeld){
+    anchorDeltaX = (x + grabOffsetX) - grabBaseX;
+    anchorDeltaY = (y + grabOffsetY) - grabBaseY;
+  } else if(handleHeld){
+    handleDeltaX = (x + grabOffsetX) - grabBaseX;
+    handleDeltaY = (y + grabOffsetY) - grabBaseY;
+  }
 };
 inputHooks.emptyUp = () => {
-  if(!anchorHeld) return;
+  if(!anchorHeld && !handleHeld) return;
   anchorHeld = false;
-  // Drag release: stop the anchor cleanly. No deceleration impulse on the
-  // chain — it keeps whatever momentum the drag imparted and swings free.
+  handleHeld = false;
+  // Release: stop the anchor cleanly. The chain keeps whatever momentum the
+  // drag imparted (its θ̇) and swings free; the anchor itself does not drift.
   anchorVx = 0;
   anchorVy = 0;
 };
@@ -614,7 +716,10 @@ function buildRhs(rope, theta, thetaDot, ax, ay){
       }
       qBend = kTheta * lapTheta;
     }
-    rhs[j] = qAnchor - cj + qBend + qDamp;
+    // Gravity: generalized force from a uniform downward (+y) field.
+    // Q_grav_j = g·L·μ_jj·cos θ_j (zero at θ=π/2 → straight-down equilibrium).
+    const qGrav = GRAVITY !== 0 ? GRAVITY * L * muDiag[j] * Math.cos(theta[j]) : 0;
+    rhs[j] = qAnchor - cj + qBend + qDamp + qGrav;
   }
 }
 
@@ -976,6 +1081,10 @@ function buildJacobianBlocks(rope, theta, thetaDot, ddt, ax, ay){
     // ∂Q_anchor/∂θ_k = δ · L · μ_kk · (cos θ_k · ax + sin θ_k · ay) (diagonal)
     A[k * Ns + k] += L * muDiag[k] * (Math.cos(theta[k]) * ax + Math.sin(theta[k]) * ay);
 
+    // ∂Q_grav/∂θ_k = −g · L · μ_kk · sin θ_k (diagonal). Keeps Newton's
+    // Jacobian consistent with the gravity term added to buildRhs.
+    if(GRAVITY !== 0) A[k * Ns + k] -= L * muDiag[k] * GRAVITY * Math.sin(theta[k]);
+
     // −∂C_i/∂θ_k: off-diagonal piece +L²·μ_ik·cos(θ_i−θ_k)·θ̇_k² for all i,
     // plus a diagonal correction −Σ_l L²·μ_kl·cos(θ_k−θ_l)·θ̇_l² at i = k.
     for(let i = 0; i < Ns; i++){
@@ -1265,7 +1374,37 @@ export function update(dt){
   // ∝ θ̇² stays much smaller during evaluation).  Arrow keys still use the
   // impulse path inside the keydown handler.
   let ax = 0, ay = 0;
-  if(anchorHeld){
+  if(!anchorHeld && USE_ANCHOR_SPRING){
+    // Spring mode (shipping control): the anchor is a spring-mass-damper
+    // chasing the handle. While held, the finger drives the handle; once
+    // released the handle stays put and the spring keeps pulling the anchor
+    // toward it until it settles. ax/ay is the spring force per unit mass —
+    // bounded by the stretch (a distance), not by Δv/h, so a slow/clamped
+    // frame can no longer manufacture a huge acceleration.
+    const dx = handleDeltaX - anchorDeltaX;
+    const dy = handleDeltaY - anchorDeltaY;
+    const dist = Math.hypot(dx, dy);
+    let fx = 0, fy = 0;
+    if(dist > 1e-6){
+      const stretch = dist - springRestLength();
+      const ux = dx / dist, uy = dy / dist;
+      fx = SPRING_K * stretch * ux;
+      fy = SPRING_K * stretch * uy;
+    }
+    // Viscous damping on the anchor's own velocity.
+    fx -= SPRING_DAMP * anchorVx;
+    fy -= SPRING_DAMP * anchorVy;
+    ax = fx / ANCHOR_MASS;
+    ay = fy / ANCHOR_MASS + GRAVITY;   // gravity acts on the anchor body too
+    // Semi-implicit Euler step for the anchor body (update v, then x).
+    anchorVx += ax * h;
+    anchorVy += ay * h;
+    anchorDeltaX += anchorVx * h;
+    anchorDeltaY += anchorVy * h;
+    if(handleHeld || Math.abs(anchorVx) > 1e-3 || Math.abs(anchorVy) > 1e-3) anchorHasInteracted = true;
+    _frameShiftY = 0;
+    _frameAy     = ay;
+  } else if(anchorHeld){
     // During drag: emptyMove has already updated anchorDeltaX/Y to track
     // the mouse exactly.  Measure this frame's anchor velocity from the
     // position delta, derive its acceleration vs. the previous frame, and
@@ -1304,6 +1443,16 @@ export function update(dt){
     anchorDeltaY += anchorVy * h;
     _frameShiftY = 0;
     _frameAy     = 0;
+  }
+
+  // Keep the handle on-screen VERTICALLY only — there's no vertical wrap, so
+  // an off-top/bottom handle would be unrecoverable. Horizontally it's free:
+  // it wraps L↔R and grab detection is wrap-aware, so it's never lost.
+  {
+    const b = ropes[0];
+    const hy = b.baseY + handleDeltaY;
+    if(hy < 0)                  handleDeltaY = -b.baseY;
+    else if(hy > canvas.height) handleDeltaY = canvas.height - b.baseY;
   }
 
   // Per real frame, take SUBSTEPS_PER_FRAME steps of the active integrator
@@ -1472,24 +1621,32 @@ function drawRopeSegments(ctx){
       const hue = (i / Math.max(1, rope.Ns - 1)) * 360;
       ctx.strokeStyle = `hsl(${hue}, 85%, 60%)`;
       ctx.beginPath();
-      ctx.moveTo(rope.px[i], rope.py[i]);
+      ctx.moveTo(rope.px[i],     rope.py[i]);
       ctx.lineTo(rope.px[i + 1], rope.py[i + 1]);
       ctx.stroke();
     }
   }
 }
 
-function drawEndpoints(ctx){
+function drawAnchorDot(ctx){
+  const r = Math.min(canvas.width, canvas.height) * ANCHOR_MARKER_RADIUS_FRAC;
+  ctx.fillStyle = ANCHOR_COLOR;
+  for(const rope of ropes){
+    ctx.beginPath();
+    ctx.arc(rope.px[0], rope.py[0], r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// The N= / energy readout is UI text, drawn once at the rope base — NOT part
+// of the tiled scene (we don't want duplicated labels on wrap copies).
+function drawAnchorLabel(ctx){
   const r = Math.min(canvas.width, canvas.height) * ANCHOR_MARKER_RADIUS_FRAC;
   ctx.font = '12px Inter, system-ui, sans-serif';
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'right';
+  ctx.fillStyle = 'rgba(230, 238, 246, 0.65)';
   for(const rope of ropes){
-    ctx.fillStyle = ANCHOR_COLOR;
-    ctx.beginPath();
-    ctx.arc(rope.px[0], rope.py[0], r, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = 'rgba(230, 238, 246, 0.65)';
     if(ENERGY_MONITOR){
       const eStr = Number.isFinite(rope.E) ? rope.E.toExponential(2) : String(rope.E);
       const tdStr = Number.isFinite(rope.maxThetaDot)  ? rope.maxThetaDot.toFixed(2)  : String(rope.maxThetaDot);
@@ -1502,8 +1659,96 @@ function drawEndpoints(ctx){
   }
 }
 
-renderExtras.push(drawEndpoints);
-renderExtras.push(drawRopeSegments);
+// Spring + handle: a coil from the chain head (anchor) to the big handle the
+// finger grabs. The coil has a fixed number of turns whose spacing adapts to
+// the current length, so it reads as a real spring whether compressed
+// (distance < rest length) or stretched.
+function drawSpringHandle(ctx){
+  if(!USE_ANCHOR_SPRING) return;
+  const minDim = Math.min(canvas.width, canvas.height);
+  const amp = minDim * SPRING_COIL_AMPLITUDE_FRAC;
+  const hr  = minDim * HANDLE_MARKER_RADIUS_FRAC;
+  for(const rope of ropes){
+    const ax = rope.px[0], ay = rope.py[0];                 // anchor = chain head
+    const hx = rope.baseX + handleDeltaX, hy = rope.baseY + handleDeltaY;
+    const dx = hx - ax, dy = hy - ay;
+    const len = Math.hypot(dx, dy);
+    ctx.strokeStyle = SPRING_COIL_COLOR;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    if(len > 1e-3){
+      const ux = dx / len, uy = dy / len;                   // axis unit
+      const pxn = -uy, pyn = ux;                            // perpendicular unit
+      const lead = 0.12;                                    // straight lead at each end
+      const turns = SPRING_COIL_TURNS;
+      const seg = (1 - 2 * lead) / turns;
+      ctx.lineTo(ax + ux * len * lead, ay + uy * len * lead);
+      for(let i = 0; i < turns; i++){
+        const t = lead + seg * (i + 0.5);
+        const side = (i % 2 === 0) ? 1 : -1;
+        ctx.lineTo(ax + ux * len * t + pxn * amp * side,
+                   ay + uy * len * t + pyn * amp * side);
+      }
+      ctx.lineTo(ax + ux * len * (1 - lead), ay + uy * len * (1 - lead));
+    }
+    ctx.lineTo(hx, hy);
+    ctx.stroke();
+    // Handle disc (semi-transparent so the string shows through it).
+    ctx.fillStyle = HANDLE_COLOR;
+    ctx.beginPath();
+    ctx.arc(hx, hy, hr, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// Whole-scene toroidal wrap: draw the entire movable scene (chain + spring +
+// handle + anchor dot) once per needed canvas shift via ctx.translate, and let
+// the canvas clip. The off-frame part of *anything* reappears on the opposite
+// edge — uniform across all elements, no per-element wrap math. Only the
+// shifts whose combined bounding box crosses an edge are drawn, so it costs
+// nothing when everything is on-screen.
+function drawScene(ctx){
+  drawRopeSegments(ctx);
+  drawSpringHandle(ctx);
+  drawAnchorDot(ctx);
+}
+
+function drawAlex2(ctx){
+  // Horizontal-only wrap: sideways whips reappear on the opposite side, but
+  // nothing ever wraps top↔bottom. With gravity the chain hangs down, so a
+  // vertical wrap would teleport a fallen chain to the top — which reads
+  // badly. (Drop the height term here to re-enable full toroidal wrap.)
+  let oxs = [0];
+  if(USE_CHAIN_WRAP){
+    const w = canvas.width;
+    // Include the handle's radius so a wrap copy is drawn whenever the disk
+    // pokes past an edge — not only when its center crosses. Without this the
+    // opposite-side image flickered (it appeared only when a chain particle
+    // happened to cross the edge).
+    const hr = Math.min(canvas.width, canvas.height) * HANDLE_MARKER_RADIUS_FRAC;
+    let minX = Infinity, maxX = -Infinity;
+    for(const rope of ropes){
+      for(let i = 0; i <= rope.Ns; i++){
+        const x = rope.px[i];
+        if(x < minX) minX = x; if(x > maxX) maxX = x;
+      }
+      const hx = rope.baseX + handleDeltaX;
+      if(hx - hr < minX) minX = hx - hr; if(hx + hr > maxX) maxX = hx + hr;
+    }
+    if(maxX > w) oxs.push(-w);
+    if(minX < 0) oxs.push(w);
+  }
+  for(const ox of oxs){
+    ctx.save();
+    ctx.translate(ox, 0);
+    drawScene(ctx);
+    ctx.restore();
+  }
+  drawAnchorLabel(ctx);   // once, untiled
+}
+
+renderExtras.push(drawAlex2);
 
 // Performance HUD — drawn as an overlay (on top of the rope) so it's always
 // legible. Reads the smoothed module-level perf state captured in update().
@@ -1541,6 +1786,11 @@ renderOverlays.push(drawPerfHud);
 
 // Initialize particle positions so the chain is visible before update() runs.
 for(const rope of ropes) updateParticlePositions(rope);
+// Park the handle above the anchor: with gravity the anchor hangs below the
+// handle, and the chain hangs below the anchor — a natural rest pose, and a
+// visible grab target before the first update() frame runs.
+handleDeltaX = 0;
+handleDeltaY = -springRestLength();
 
 // Reset re-initializes both ropes to horizontal at rest, clears anchor offset.
 document.getElementById('resetDisk')?.addEventListener('click', () => {
@@ -1550,8 +1800,12 @@ document.getElementById('resetDisk')?.addEventListener('click', () => {
   anchorVy = 0;
   prevAnchorDeltaX = 0;
   prevAnchorDeltaY = 0;
+  anchorHeld = false;
+  handleHeld = false;
+  handleDeltaX = 0;
+  handleDeltaY = -springRestLength();
   for(const rope of ropes){
-    rope.theta.fill(0);
+    rope.theta.fill(INITIAL_THETA);
     rope.thetaDot.fill(0);
     rope.warmStartValid = false;
     rope.E = 0;
