@@ -176,7 +176,7 @@ const MAX_DTHETADOT_PER_SUBSTEP      = 0;
 // log the conditions (joint, θ̇, anchor accel ax/ay, which grab is active,
 // warm vs cold start, Newton converged) so we can see WHAT produces the big
 // transients. Console only (test on desktop).
-const PEAK_LOG            = true;
+const PEAK_LOG            = false;  // off during the "first-event" observation — keeps smooth play silent
 const PEAK_LOG_THRESHOLD  = 20;
 
 // REJECT_NONCONVERGED: the anti-chaos safety net. A substep where Newton fails
@@ -187,9 +187,11 @@ const PEAK_LOG_THRESHOLD  = 20;
 // moment Newton can solve again. This supersedes the magnitude clamp above,
 // which clipped the legitimate whip (large |Δθ̇| but converged).
 const REJECT_NONCONVERGED = true;
-// Diagnostic: when true, log a one-line summary per frame showing how
-// each substep's Newton iteration went.
-const NEWTON_LOG_ENABLED             = false;
+// Diagnostic: when true, log a one-line summary per frame showing how each
+// substep's Newton iteration went — GATED to problem frames only (a substep
+// fails to converge, or strains near the iter cap), silent when healthy. This
+// is the main "protection engaged" log for the first-event observation.
+const NEWTON_LOG_ENABLED             = true;
 
 // --- Energy monitoring (diagnostic) ------------------------------------
 //
@@ -205,7 +207,7 @@ const E_SPIKE_RATIO   = 100;       // log when E_new / E_prev exceeds this
 // non-decay investigation: perturb a hands-off chain (Reset, then
 // window.alex2.kickChain()) and watch whether KE falls ~e-fold per 2 s (as
 // DAMPING_MASS=0.5 predicts) or plateaus (energy not leaving). Console only.
-const ENERGY_DECAY_LOG       = true;
+const ENERGY_DECAY_LOG       = false;  // off during the "first-event" observation — keep the console silent until a protection fires (state is on the HUD)
 const ENERGY_DECAY_LOG_EVERY = 30;
 
 // --- Trace mode (diagnostic) ------------------------------------------
@@ -813,6 +815,10 @@ function buildRhs(rope, theta, thetaDot, ax, ay){
 // all 4 substeps within one frame.  ratio = min/max ≈ 1/cond_number.
 let _solveMinPivot = Infinity;
 let _solveMaxPivot = 0;
+// Cumulative count of singular-pivot bails in gaussSolve (a near-zero pivot →
+// the solve returns zeros). A silent numerical-safety event; surfaced in the
+// Newton log so we notice if it ever fires.
+let _singularBails = 0;
 
 // Per-frame mouse-input snapshot, captured by update() at the start of
 // each frame so the substep log can show "what did the mouse do this
@@ -846,6 +852,7 @@ function gaussSolve(N, A, b, x){
     if(apivot > _solveMaxPivot) _solveMaxPivot = apivot;
     if(apivot < 1e-12){
       // Singular; bail with zeros to avoid NaN cascades.
+      _singularBails++;
       for(let i = 0; i < N; i++) x[i] = 0;
       return;
     }
@@ -1638,7 +1645,7 @@ export function update(dt){
       if(newtonConvCount < substeps || maxIters >= NEWTON_NEAR_FAIL_ITERS){
         const itersStr = newtonItersArr.join(',');
         const relStr   = newtonRelArr.map(r => Number.isFinite(r) ? r.toExponential(2) : String(r)).join(',');
-        console.log(`[Newton N=${rope.N}] iters=[${itersStr}] relStep=[${relStr}] converged=${newtonConvCount}/${substeps} (${INTEGRATOR})`);
+        console.log(`[Newton N=${rope.N}] iters=[${itersStr}] relStep=[${relStr}] converged=${newtonConvCount}/${substeps} rejΣ=${_rejectTotal} singBailΣ=${_singularBails} (${INTEGRATOR})`);
       }
       newtonConvCount = 0;
     }
