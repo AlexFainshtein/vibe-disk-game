@@ -164,6 +164,29 @@ const NEWTON_MAX_ITERS               = 8;
 const NEWTON_WARM_START              = true;
 // Newton convergence: stop when ‖Δy‖ / max(‖y‖, 1) < NEWTON_TOL.
 const NEWTON_TOL                     = 1e-6;
+// Per-substep angular-velocity-increment clamp (anti-chaos safety net).
+// Caps |Δθ̇| = |h_sub·θ̈| per joint each implicit substep. A fast RIGID spin
+// has θ̈≈0 (no straining), so this is meant to leave normal motion untouched
+// and bite only the exploding regime. *Currently 0 (disabled) for
+// CALIBRATION* — the HUD shows the peak |Δθ̇| so we can read the normal-play
+// demand and the blow-up demand, then set the cap between them. (0.6 was a
+// first guess and engaged during normal play — too low.)
+const MAX_DTHETADOT_PER_SUBSTEP      = 0;
+// PEAK_LOG: when a new |Δθ̇| high-water record above PEAK_LOG_THRESHOLD is set,
+// log the conditions (joint, θ̇, anchor accel ax/ay, which grab is active,
+// warm vs cold start, Newton converged) so we can see WHAT produces the big
+// transients. Console only (test on desktop).
+const PEAK_LOG            = true;
+const PEAK_LOG_THRESHOLD  = 20;
+
+// REJECT_NONCONVERGED: the anti-chaos safety net. A substep where Newton fails
+// to converge is the blow-up signature (confirmed: legit fast whip stays
+// conv=true even at |θ̇|~425; the explosion flips to conv=false). On such a
+// substep, discard the untrustworthy result and COAST — keep the last good
+// θ̇, advance θ by θ_n + h·θ̇_n. Bounded, injects no energy, and recovers the
+// moment Newton can solve again. This supersedes the magnitude clamp above,
+// which clipped the legitimate whip (large |Δθ̇| but converged).
+const REJECT_NONCONVERGED = true;
 // Diagnostic: when true, log a one-line summary per frame showing how
 // each substep's Newton iteration went.
 const NEWTON_LOG_ENABLED             = false;
@@ -176,6 +199,14 @@ const NEWTON_LOG_ENABLED             = false;
 // growth — is a numerical-stability problem we want to catch in the act.
 const ENERGY_MONITOR  = false;     // off — no console spam during this test
 const E_SPIKE_RATIO   = 100;       // log when E_new / E_prev exceeds this
+
+// ENERGY_DECAY_LOG: every ENERGY_DECAY_LOG_EVERY frames, print elapsed time +
+// chain kinetic energy + max|θ̇| + anchor speed + reject total. For the
+// non-decay investigation: perturb a hands-off chain (Reset, then
+// window.alex2.kickChain()) and watch whether KE falls ~e-fold per 2 s (as
+// DAMPING_MASS=0.5 predicts) or plateaus (energy not leaving). Console only.
+const ENERGY_DECAY_LOG       = true;
+const ENERGY_DECAY_LOG_EVERY = 30;
 
 // --- Trace mode (diagnostic) ------------------------------------------
 //
@@ -490,10 +521,40 @@ function triggerDownload(content, filename, mimeType){
   URL.revokeObjectURL(url);
 }
 
+// Debug perturbation: add a smooth half-sine bump to the chain's θ̇ WITHOUT
+// touching the anchor — a clean way to excite the chain and watch it decay in
+// isolation (tests DAMPING_MASS without any anchor forcing). Call from the
+// console: window.alex2.kickChain() (optional amplitude). The energy log then
+// shows whether KE falls off or plateaus.
+function kickChain(amp = 3){
+  const rope = ropes[0];
+  const Ns = rope.Ns;
+  for(let i = 0; i < Ns; i++){
+    rope.thetaDot[i] += amp * Math.sin((i + 1) * Math.PI / Ns);
+  }
+  rope.warmStartValid = false;   // the state jumped; don't warm-start from the old increment
+  _eLogFrame = 0;                // restart the energy-log clock so t=0 is the kick
+  _eLogTime  = 0;
+  console.log(`[kick] chain θ̇ perturbed (amp=${amp}); watch the [E] log`);
+}
+
+// Debug perturbation: give the ANCHOR a velocity kick (px/s) and leave the
+// chain at rest — isolates the anchor's spring-mass-damper. Watch |aV| in the
+// [E] log: clean decay to ~0 ⇒ anchor damping is fine; a plateau / persistent
+// jitter ⇒ the once-per-frame anchor integration is the energy pump we're
+// hunting. Call: window.alex2.kickAnchor() (optional vx, vy).
+function kickAnchor(vx = 400, vy = 0){
+  anchorVx += vx;
+  anchorVy += vy;
+  _eLogFrame = 0;
+  _eLogTime  = 0;
+  console.log(`[kick] anchor velocity kicked (vx=${vx}, vy=${vy}); watch |aV| in the [E] log`);
+}
+
 // Expose ropes on window for console-side inspection during debugging:
 // `alex2.ropes[0].theta`, etc.  Also exposes dumpInputLog() for manual
 // CSV download.
-if(typeof window !== 'undefined') window.alex2 = { ropes, dumpInputLog, dumpSubstepLog, dumpThetaLog, dumpFullState };
+if(typeof window !== 'undefined') window.alex2 = { ropes, dumpInputLog, dumpSubstepLog, dumpThetaLog, dumpFullState, kickChain, kickAnchor };
 
 // Trace state: counts frames since page load / last Reset. Tracing waits
 // for the first anchor input (via applyAnchorVelocityImpulse) before
@@ -529,6 +590,30 @@ let _perfRawDtMs    = 0;      // dt actually handed to update() this frame (ms)
 let _perfClamped    = false;  // did dt hit main.js's 33 ms ceiling this frame
 let _perfSubsteps   = 0;      // substeps taken this frame (for the HUD readout)
 const _PERF_EMA     = 0.1;    // smoothing factor for the two timing readouts
+// Anti-chaos clamp engagement counters (per-joint events): this-frame (live)
+// + cumulative since load/Reset. Shown on the HUD so we can see whether the
+// clamp ever fires during normal play (should stay 0) vs only on blow-ups.
+let _clampThisFrame = 0;
+let _clampTotal     = 0;
+// Reject-on-non-convergence counters (substeps coasted because Newton failed).
+let _rejectThisFrame = 0;
+let _rejectTotal     = 0;
+// Energy-decay logger bookkeeping (frame counter + elapsed physics time).
+// _logMax* are PEAK-over-interval accumulators (sampled every frame, reset
+// after each print) — a point sample every 30 frames aliases the fast anchor
+// oscillation (~0.31 s period) and misses its amplitude.
+let _eLogFrame = 0;
+let _eLogTime  = 0;
+let _logMaxKE          = 0;
+let _logMaxAnchorSpeed = 0;
+// Peak per-joint |Δθ̇| (= |h_sub·θ̈|) seen this frame, pre-clamp, + which joint.
+// HUD readout for calibrating MAX_DTHETADOT_PER_SUBSTEP from real data.
+let _maxDThetaDot      = 0;
+let _maxDThetaDotJoint = -1;
+// Peak-hold high-water mark (only rises; cleared by Reset) so the value is
+// readable without catching the per-frame flicker.
+let _maxDThetaDotHold      = 0;
+let _maxDThetaDotHoldJoint = -1;
 
 // --- Anchor state (shared across both ropes) ---------------------------
 
@@ -1194,7 +1279,8 @@ function implicitStep(rope, h, ax, ay, gamma){
   thetaDotN.set(thetaDot);
 
   // Initial guess for the Newton iterate y_{n+1}^(0).
-  if(NEWTON_WARM_START && rope.warmStartValid){
+  const usedWarm = NEWTON_WARM_START && rope.warmStartValid;   // captured for PEAK_LOG
+  if(usedWarm){
     // Warm start: linear extrapolation from the previous converged substep's
     // realized increment, y⁰ = y_n + Δy_prev.  Bounded physical motion, so it
     // can't overshoot Newton's basin the way h·θ̈ can; also skips the
@@ -1297,6 +1383,51 @@ function implicitStep(rope, h, ax, ay, gamma){
     const denom = Math.max(Math.sqrt(yNorm2), 1);
     lastRel = Math.sqrt(dNorm2) / denom;
     if(lastRel < NEWTON_TOL){ converged = true; break; }
+  }
+
+  // Anti-chaos safety net: a non-converged substep is the blow-up signature,
+  // so reject its (untrustworthy) result and COAST — keep the last good θ̇ and
+  // advance θ at it. Bounded, no energy injected; recovers once Newton can
+  // solve again. Done before the peak/warm-start blocks so they see the
+  // coasted (sane) values, not the divergent garbage.
+  if(REJECT_NONCONVERGED && !converged){
+    // Coast, but STILL dissipate — apply mass damping even on a rejected
+    // substep. Without this, persistent rejection (sustained chaos) bypasses
+    // all damping and the chain spins/winds forever with zero input.
+    const damp = 1 - DAMPING_MASS * h;
+    for(let i = 0; i < Ns; i++){
+      thetaDotNew[i] = thetaDotN[i] * damp;
+      thetaNew[i]    = thetaN[i] + h * thetaDotNew[i];
+    }
+    _rejectThisFrame++;
+    _rejectTotal++;
+  }
+
+  // Anti-chaos clamp: cap the per-joint angular-velocity increment |Δθ̇|.
+  // Bites only the straining/exploding regime (a rigid spin has θ̈≈0), and
+  // running it BEFORE the warm-start is recorded also bounds the next
+  // substep's Newton seed (the thing that overshoots the basin). The
+  // !(d < cap) / !(d > -cap) form catches NaN/Inf too — a plain d > cap
+  // would let a non-finite increment slip through.
+  {
+    const cap = MAX_DTHETADOT_PER_SUBSTEP;
+    for(let i = 0; i < Ns; i++){
+      let d = thetaDotNew[i] - thetaDotN[i];
+      const ad = Math.abs(d);
+      if(ad > _maxDThetaDot){ _maxDThetaDot = ad; _maxDThetaDotJoint = i; }   // pre-clamp peak for the HUD
+      if(ad > _maxDThetaDotHold){                                                          // peak-hold
+        _maxDThetaDotHold = ad; _maxDThetaDotHoldJoint = i;
+        if(PEAK_LOG && ad > PEAK_LOG_THRESHOLD){
+          console.log(`[peak] Δθ̇=${ad.toFixed(1)} @j${i}/${Ns} θ̇=${thetaDotNew[i].toFixed(1)} ax=${ax.toFixed(0)} ay=${ay.toFixed(0)} h=${h.toFixed(4)} ${handleHeld ? 'HANDLE' : anchorHeld ? 'ANCHOR' : 'idle'} ${usedWarm ? 'warm' : 'COLD'} conv=${converged}`);
+        }
+      }
+
+      if(cap > 0){
+        if(!(d < cap))       { d =  cap; _clampThisFrame++; _clampTotal++; }   // d ≥ cap, or NaN/+Inf
+        else if(!(d > -cap)) { d = -cap; _clampThisFrame++; _clampTotal++; }   // d ≤ −cap, or −Inf
+        thetaDotNew[i] = thetaDotN[i] + d;
+      }
+    }
   }
 
   // Record the realized increment as the next substep's warm-start seed —
@@ -1472,6 +1603,10 @@ export function update(dt){
   // (the diagnostic monitors below are excluded so this reads as the
   // shippable physics cost). EMA-folded into _perfPhysicsMs after the loop.
   let _physMsThisFrame = 0;
+  _clampThisFrame = 0;   // reset the live anti-chaos-clamp counter for this frame
+  _rejectThisFrame = 0;  // reset the live reject-on-non-convergence counter
+  _maxDThetaDot   = 0;   // reset the per-frame peak |Δθ̇| readout
+  _maxDThetaDotJoint = -1;
   // Per-frame Newton log, only used when NEWTON_LOG_ENABLED.  Captures
   // (iters, relStep, converged) for every substep across every rope so we
   // can spot Newton failures or near-failures.
@@ -1605,6 +1740,36 @@ export function update(dt){
       tracingActive = false;
       if(SUBSTEP_LOG_ENABLED) dumpSubstepLog('duration reached');
       if(INPUT_LOG_ENABLED)   dumpInputLog('trace duration reached (paired with substep)');
+    }
+  }
+
+  // Energy-decay logger: every frame, accumulate the PEAK chain KE and PEAK
+  // anchor speed over the interval (point samples alias the fast anchor
+  // oscillation); print + reset every ENERGY_DECAY_LOG_EVERY frames.
+  if(ENERGY_DECAY_LOG){
+    _eLogTime += h;
+    const KE = computeEnergy(ropes[0]);
+    if(KE > _logMaxKE) _logMaxKE = KE;
+    const aSpeed = Math.hypot(anchorVx, anchorVy);
+    if(aSpeed > _logMaxAnchorSpeed) _logMaxAnchorSpeed = aSpeed;
+    if(_eLogFrame++ % ENERGY_DECAY_LOG_EVERY === 0){
+      // Shape metrics (slowly-varying → point sample is fine): bending
+      // potential energy ½·k_θ·Σ(Δθ)², and the sharpest single-link bend
+      // max|Δθ| (a direct loop/kink detector — KE misses a frozen loop).
+      const rope = ropes[0];
+      const kTheta = BENDING_EI / rope.segmentLength;
+      let bendPE = 0, maxDth = 0;
+      for(let i = 0; i < rope.Ns - 1; i++){
+        const dth = rope.theta[i + 1] - rope.theta[i];
+        bendPE += dth * dth;
+        const a = Math.abs(dth);
+        if(a > maxDth) maxDth = a;
+      }
+      bendPE *= 0.5 * kTheta;
+      const ke = Number.isFinite(_logMaxKE) ? _logMaxKE.toExponential(2) : _logMaxKE;
+      console.log(`[E] t=${_eLogTime.toFixed(1)}s  peakKE=${ke}  bendPE=${bendPE.toExponential(2)}  max|Δθ|=${maxDth.toFixed(3)}  peak|aV|=${_logMaxAnchorSpeed.toExponential(2)}  rejΣ=${_rejectTotal}`);
+      _logMaxKE = 0;
+      _logMaxAnchorSpeed = 0;
     }
   }
 
@@ -1763,6 +1928,8 @@ function drawPerfHud(ctx){
     `physics ${_perfPhysicsMs.toFixed(1)} ms   (${physPct.toFixed(0)}% of frame)`,
     `dt ${_perfRawDtMs.toFixed(1)} ms${_perfClamped ? '   ⚠ CLAMPED@33' : ''}`,
     `N=${N}  substeps=${_perfSubsteps}  ${INTEGRATOR}`,
+    `Δθ̇ now ${_maxDThetaDot.toFixed(1)}  max ${_maxDThetaDotHold.toFixed(1)} @j${_maxDThetaDotHoldJoint}  cap ${MAX_DTHETADOT_PER_SUBSTEP || 'off'}`,
+    `reject ${_rejectThisFrame}/frame   (Σ${_rejectTotal})`,
   ];
 
   ctx.save();
@@ -1776,8 +1943,10 @@ function drawPerfHud(ctx){
   ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
   ctx.fillRect(8, 8, maxW + pad * 2, lines.length * lh + pad * 2);
   for(let i = 0; i < lines.length; i++){
-    // Clamp line in amber as a visual alarm.
-    ctx.fillStyle = (i === 2 && _perfClamped) ? '#e8b84b' : 'rgba(235, 242, 248, 0.92)';
+    // Amber alarm: dt-clamp line (i=2) while clamped; reject line (i=5) on any
+    // frame the anti-chaos safety net coasted a non-converged substep.
+    const alarm = (i === 2 && _perfClamped) || (i === 5 && _rejectThisFrame > 0);
+    ctx.fillStyle = alarm ? '#e8b84b' : 'rgba(235, 242, 248, 0.92)';
     ctx.fillText(lines[i], 8 + pad, 8 + pad + i * lh);
   }
   ctx.restore();
@@ -1827,6 +1996,15 @@ document.getElementById('resetDisk')?.addEventListener('click', () => {
   traceFrameCount      = 0;
   tracingActive        = TRACE_ENABLED;
   anchorHasInteracted  = false;
+  // Reset the anti-chaos counters and the Δθ̇ peak-hold.
+  _clampThisFrame  = 0;
+  _clampTotal      = 0;
+  _rejectThisFrame = 0;
+  _rejectTotal     = 0;
+  _maxDThetaDotHold      = 0;
+  _maxDThetaDotHoldJoint = -1;
+  _eLogFrame = 0;
+  _eLogTime  = 0;
   // Re-arm input log too (any unsaved rows are discarded; user should call
   // window.alex2.dumpInputLog() first if they want to keep them).
   inputLogRows.length = 0;

@@ -125,6 +125,29 @@ Most outputs go to the console; the θ / substep / input logs download as CSV (s
 - **Spring made the blow-up recoverable, not impossible (2026-06-10)** — with the mouse→anchor spring in place, a hard jerk still spikes Newton (fps dips to ~5, then climbs back) but no longer NaNs permanently: the spring removed the clamp-inflation feedback, so the solver re-converges and it self-heals. *Residual:* an **involuntary** hand jerk is sharper than a deliberate one and can still trigger a chaos episode; sometimes it plateaus at a sustained ~22 fps (Newton chronically near its iter cap, energy injection ≈ damping removal) rather than fully recovering. An anti-chaos mechanism is the next planned fix (deliberately deferred so it doesn't mask the raw behavior).
 - **No friction / no collisions; gravity is now on** — gravity was added (chain + anchor; see "What Alex2 is"). Friction and self/wall collisions are still out by design — physically-correct chain-floor collision in reduced coordinates is a large separate project; for now the chain may pass off-screen (the wrap is horizontal-only, so it doesn't reappear at the top).
 
+## Anti-chaos safety net + current understanding (2026-06-12)
+
+This section is deliberately split into **measured** facts (from logged tests) and **hypotheses** (interpretations not yet proven). Do not promote a hypothesis to a fact without a test.
+
+**The safety net (in code, `REJECT_NONCONVERGED`, default true):** a substep where Newton fails to converge (`conv=false`) is rejected — instead of committing its (untrustworthy) result, the chain **coasts**, and (fix "a", 2026-06-12) **still applies mass damping** during the coast: `θ̇ ← θ̇·(1−α·h)`, `θ ← θ + h·θ̇`. The damping-during-coast is essential: without it, persistent rejection bypasses all damping. The earlier per-substep `Δθ̇` magnitude clamp (`MAX_DTHETADOT_PER_SUBSTEP`) is **disabled** — it clipped legitimate fast whip; convergence, not magnitude, is the right discriminator.
+
+**Diagnostic tooling added (all flag-gated, for the ongoing investigation):** `[E]` energy-decay log (`ENERGY_DECAY_LOG` — peakKE, bendPE, max|Δθ|, peak|aV|, rejΣ); `PEAK_LOG` (per-record context: joint, θ̇, ax/ay, warm/COLD, conv); `window.alex2.kickChain()` / `kickAnchor()` (isolated perturbations); HUD lines for reject count + peak Δθ̇.
+
+**Measured:**
+- Isolated chain kick decays e-fold ≈ 2 s to a ~6e-27 numerical floor; anchor kick too (slightly slower). Damping (mass + spring) works correctly on the converged path.
+- The reject step prevents the NaN explosion. `conv=false` is the clean blow-up signature — legitimate fast motion stays `conv=true` up to θ̇ ~ 2000.
+- Under sustained chaos the chain **winds up** (`max|Δθ|` → 10⁵–10⁶ rad, `bendPE` grows in step).
+- **Before** fix (a): sustained chaos was **self-sustaining with the anchor at rest** (`|aV| ~ 1e-15`, zero input) — rejΣ climbing ~480/s, peakKE pinned ~2e9, `max|Δθ|` winding linearly.
+- **After** fix (a): that self-sustain dies quickly (rejΣ freezes, peakKE drops 100×+ in ~1 s), but the chain is left **wound** — and the wound joint is **pinned, not relaxing**: over a ~46-min hang `max|Δθ|`/`bendPE` stayed frozen (`1520.4`/`2.91e5`, ~0.05 change). The winding is *visually invisible* (position is θ mod 2π, so the chain looks straight while carrying the `bendPE`). A tiny non-decaying oscillation persists (`peakKE ~ 2.4e-20`, well above the 6e-27 kick-floor) — a candidate, unconfirmed match for the 12-h overnight wiggle.
+- Chaos is **still generatable** after all fixes — bounded and self-recovering now, but not prevented.
+
+**Hypotheses (hold loosely):**
+- The reject-coast bypassing damping *was* the mechanism of the pre-fix self-sustain. (Strongly suggested — fix (a) changed exactly that and stopped it — but "stopped when we changed X" is not proof X was the sole cause.)
+- The linear-bending unbounded winding is what keeps Newton failing under sustained chaos (winding ↔ reject reinforcement). Correlation observed; causation inferred.
+- **UNEXPLAINED / do not assume:** the 12-hour overnight observation (random few-second oscillations on a *settled, hanging* chain) is **not** established to be the same phenomenon as the post-chaos wound state. A slow monotonic unwind does not obviously produce few-second random oscillations; these may be unrelated. Treat the overnight wiggle as an open mystery, possibly never resolved.
+
+**Open problem (the real one):** chaos is still generatable. Candidate next step is fix "b" — bound the winding with a non-periodic soft barrier near ±π (linear bending + `β·exp(c·(|Δθ|−π_max))`) so the bending force stays solvable — but this is an untested proposal, and a model change to weigh deliberately.
+
 ## Future directions
 
 The next phase targets **feel and input-limiting**, not integrator robustness. Per project direction we are explicitly **not** pursuing smaller h, adaptive step-rejection, or line-search Newton.
