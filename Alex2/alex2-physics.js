@@ -33,7 +33,7 @@ bar.hidden = true;
 inputHooks.diskGrab = false;
 setDiskRadiusFraction(0);
 
-const N = 50;
+const N = 50;   // number of particles in the chain (joints = N − 1)
 // Chain total length = max(ROPE_LENGTH_FRACTION·width, ROPE_LENGTH_FRACTION_H·height).
 // The height term keeps the chain a useful length on narrow/tall screens
 // (e.g. a folded foldable) where width alone makes it too short.
@@ -107,7 +107,7 @@ const USE_CHAIN_WRAP = true;
 // property). Higher = stiffer, but too high will require smaller dt for
 // RK4 stability. Set to 0 to disable bending entirely (chain is a free
 // jointed pendulum with no restoring force).
-const BENDING_EI = 1;
+const BENDING_EI = 500000;   // continuum flexural rigidity; k_θ = BENDING_EI / L. Sweet spot ~100K–1M (holds shape, kinks spring straight, still far from a rigid rod). EI=1 was ~3 orders too weak — kinks froze.
 
 // --- Damping (non-conservative; added directly to the EOM, not Lagrangian) ---
 //
@@ -140,7 +140,7 @@ const DAMPING_MASS = 0.5; // was 0.1, 0
 // Equivalence-principle check: if the anchor free-falls (ay=g), Q_anchor's
 // −cos θ_j·ay exactly cancels Q_grav, so a free-falling chain doesn't deform.
 // Set to 0 to disable. Tunable for feel.
-const GRAVITY = 1000;
+const GRAVITY = 1000;   // downward acceleration (px/s²) on the chain + anchor; 0 disables
 // --- Implicit integrators (experimental, B3 in our discussion) --------
 //
 // INTEGRATOR: 'rk4' (explicit, the old default), 'implicit-midpoint'
@@ -187,11 +187,23 @@ const PEAK_LOG_THRESHOLD  = 20;
 // moment Newton can solve again. This supersedes the magnitude clamp above,
 // which clipped the legitimate whip (large |Δθ̇| but converged).
 const REJECT_NONCONVERGED = true;
+
+// USE_HALVING: the principled recovery before coasting. When a substep's
+// Newton fails, retry it as two half-steps (recursively, up to
+// HALVING_MAX_DEPTH levels) — a smaller h shrinks the Newton-basin overshoot
+// that causes the failure, so the slice usually becomes solvable. Coasting
+// (REJECT_NONCONVERGED) demotes to the last resort, used only if even the
+// deepest halving still can't converge. Local: only the failing slice pays
+// the extra cost, so normal play is untouched.
+const USE_HALVING       = true;
+const HALVING_MAX_DEPTH = 2;   // 2 → retry down to h_sub/4 before coasting
+
 // Diagnostic: when true, log a one-line summary per frame showing how each
 // substep's Newton iteration went — GATED to problem frames only (a substep
-// fails to converge, or strains near the iter cap), silent when healthy. This
-// is the main "protection engaged" log for the first-event observation.
-const NEWTON_LOG_ENABLED             = true;
+// fails to converge, or strains near the iter cap), silent when healthy.
+// Off now — decluttering the console for the winding check (the [E] log
+// carries halveΣ/rejΣ, so we still see failure activity).
+const NEWTON_LOG_ENABLED             = false;
 
 // --- Energy monitoring (diagnostic) ------------------------------------
 //
@@ -207,7 +219,7 @@ const E_SPIKE_RATIO   = 100;       // log when E_new / E_prev exceeds this
 // non-decay investigation: perturb a hands-off chain (Reset, then
 // window.alex2.kickChain()) and watch whether KE falls ~e-fold per 2 s (as
 // DAMPING_MASS=0.5 predicts) or plateaus (energy not leaving). Console only.
-const ENERGY_DECAY_LOG       = false;  // off during the "first-event" observation — keep the console silent until a protection fires (state is on the HUD)
+const ENERGY_DECAY_LOG       = false;  // off — the stream was burying the on-demand dumpTheta() output
 const ENERGY_DECAY_LOG_EVERY = 30;
 
 // --- Trace mode (diagnostic) ------------------------------------------
@@ -553,10 +565,29 @@ function kickAnchor(vx = 400, vy = 0){
   console.log(`[kick] anchor velocity kicked (vx=${vx}, vy=${vy}); watch |aV| in the [E] log`);
 }
 
+// On-demand winding readout: print the current per-link bend Δθ_i = θ_{i+1}−θ_i
+// (with its turn count Δθ/2π) and the raw θ values. Call window.alex2.dumpTheta()
+// whenever you've set up a visual state — no flooding, one print per call. Key
+// comparison: a Δθ of ~2π is two links pointing the SAME way → drawn straight,
+// no visible bend, yet linear bending charges energy for it.
+function dumpTheta(){
+  const rope = ropes[0];
+  const Ns = rope.Ns;
+  const TAU = 2 * Math.PI;
+  const th = Array.from(rope.theta, t => t.toFixed(3)).join(', ');
+  const dth = [];
+  for(let i = 0; i < Ns - 1; i++){
+    const d = rope.theta[i + 1] - rope.theta[i];
+    dth.push(`${d.toFixed(3)}(${(d / TAU).toFixed(2)}t)`);
+  }
+  console.log(`[θ]  ${th}`);
+  console.log(`[Δθ] ${dth.join('  ')}`);
+}
+
 // Expose ropes on window for console-side inspection during debugging:
 // `alex2.ropes[0].theta`, etc.  Also exposes dumpInputLog() for manual
 // CSV download.
-if(typeof window !== 'undefined') window.alex2 = { ropes, dumpInputLog, dumpSubstepLog, dumpThetaLog, dumpFullState, kickChain, kickAnchor };
+if(typeof window !== 'undefined') window.alex2 = { ropes, dumpInputLog, dumpSubstepLog, dumpThetaLog, dumpFullState, kickChain, kickAnchor, dumpTheta };
 
 // Trace state: counts frames since page load / last Reset. Tracing waits
 // for the first anchor input (via applyAnchorVelocityImpulse) before
@@ -600,6 +631,16 @@ let _clampTotal     = 0;
 // Reject-on-non-convergence counters (substeps coasted because Newton failed).
 let _rejectThisFrame = 0;
 let _rejectTotal     = 0;
+// Step-halving counters (a failed slice retried as half-steps before coasting).
+let _halveThisFrame = 0;
+let _halveTotal     = 0;
+
+// Exponential format with a fixed-width exponent (sign + 2 digits): 1.23e-09,
+// 1.04e+00, so console columns line up. (toExponential gives 1.23e-9 / e+0.)
+function expFix(x, mantissa = 2){
+  if(!Number.isFinite(x)) return String(x);
+  return x.toExponential(mantissa).replace(/e([+-])(\d+)/, (_, s, d) => `e${s}${d.padStart(2, '0')}`);
+}
 // Energy-decay logger bookkeeping (frame counter + elapsed physics time).
 // _logMax* are PEAK-over-interval accumulators (sampled every frame, reset
 // after each print) — a point sample every 30 frames aliases the fast anchor
@@ -1392,54 +1433,31 @@ function implicitStep(rope, h, ax, ay, gamma){
     if(lastRel < NEWTON_TOL){ converged = true; break; }
   }
 
-  // Anti-chaos safety net: a non-converged substep is the blow-up signature,
-  // so reject its (untrustworthy) result and COAST — keep the last good θ̇ and
-  // advance θ at it. Bounded, no energy injected; recovers once Newton can
-  // solve again. Done before the peak/warm-start blocks so they see the
-  // coasted (sane) values, not the divergent garbage.
-  if(REJECT_NONCONVERGED && !converged){
-    // Coast, but STILL dissipate — apply mass damping even on a rejected
-    // substep. Without this, persistent rejection (sustained chaos) bypasses
-    // all damping and the chain spins/winds forever with zero input.
-    const damp = 1 - DAMPING_MASS * h;
-    for(let i = 0; i < Ns; i++){
-      thetaDotNew[i] = thetaDotN[i] * damp;
-      thetaNew[i]    = thetaN[i] + h * thetaDotNew[i];
-    }
-    _rejectThisFrame++;
-    _rejectTotal++;
-  }
-
-  // Anti-chaos clamp: cap the per-joint angular-velocity increment |Δθ̇|.
-  // Bites only the straining/exploding regime (a rigid spin has θ̈≈0), and
-  // running it BEFORE the warm-start is recorded also bounds the next
-  // substep's Newton seed (the thing that overshoots the basin). The
-  // !(d < cap) / !(d > -cap) form catches NaN/Inf too — a plain d > cap
-  // would let a non-finite increment slip through.
-  {
+  // Commit ONLY on success. On failure, leave θ/θ̇ at the substep-start state
+  // (theta itself was never modified — only the thetaNew scratch was), so the
+  // caller (advanceSubstep) can retry this slice as half-steps before any
+  // coast. The coast itself now lives in coastSubstep(), used as last resort.
+  if(converged){
+    // Peak |Δθ̇| tracking for the HUD/log (+ optional magnitude clamp, off by
+    // default) — on the converged increment only.
     const cap = MAX_DTHETADOT_PER_SUBSTEP;
     for(let i = 0; i < Ns; i++){
       let d = thetaDotNew[i] - thetaDotN[i];
       const ad = Math.abs(d);
-      if(ad > _maxDThetaDot){ _maxDThetaDot = ad; _maxDThetaDotJoint = i; }   // pre-clamp peak for the HUD
-      if(ad > _maxDThetaDotHold){                                                          // peak-hold
+      if(ad > _maxDThetaDot){ _maxDThetaDot = ad; _maxDThetaDotJoint = i; }
+      if(ad > _maxDThetaDotHold){
         _maxDThetaDotHold = ad; _maxDThetaDotHoldJoint = i;
         if(PEAK_LOG && ad > PEAK_LOG_THRESHOLD){
           console.log(`[peak] Δθ̇=${ad.toFixed(1)} @j${i}/${Ns} θ̇=${thetaDotNew[i].toFixed(1)} ax=${ax.toFixed(0)} ay=${ay.toFixed(0)} h=${h.toFixed(4)} ${handleHeld ? 'HANDLE' : anchorHeld ? 'ANCHOR' : 'idle'} ${usedWarm ? 'warm' : 'COLD'} conv=${converged}`);
         }
       }
-
       if(cap > 0){
-        if(!(d < cap))       { d =  cap; _clampThisFrame++; _clampTotal++; }   // d ≥ cap, or NaN/+Inf
-        else if(!(d > -cap)) { d = -cap; _clampThisFrame++; _clampTotal++; }   // d ≤ −cap, or −Inf
+        if(!(d < cap))       { d =  cap; _clampThisFrame++; _clampTotal++; }
+        else if(!(d > -cap)) { d = -cap; _clampThisFrame++; _clampTotal++; }
         thetaDotNew[i] = thetaDotN[i] + d;
       }
     }
-  }
-
-  // Record the realized increment as the next substep's warm-start seed —
-  // but only if Newton converged, so we never extrapolate from garbage.
-  if(converged){
+    // Warm-start seed for the next substep = this realized increment.
     const prevDTheta    = rope.prevDTheta;
     const prevDThetaDot = rope.prevDThetaDot;
     for(let i = 0; i < Ns; i++){
@@ -1447,12 +1465,12 @@ function implicitStep(rope, h, ax, ay, gamma){
       prevDThetaDot[i] = thetaDotNew[i] - thetaDotN[i];
     }
     rope.warmStartValid = true;
+    // Commit.
+    theta.set(thetaNew);
+    thetaDot.set(thetaDotNew);
   } else {
-    rope.warmStartValid = false;
+    rope.warmStartValid = false;   // failed seed is garbage; θ/θ̇ left unchanged
   }
-
-  theta.set(thetaNew);
-  thetaDot.set(thetaDotNew);
 
   rope.pivotMin            = _solveMinPivot;
   rope.pivotMax            = _solveMaxPivot;
@@ -1462,6 +1480,40 @@ function implicitStep(rope, h, ax, ay, gamma){
   rope.lastNewtonConverged = converged;
 
   return converged;
+}
+
+// Last-resort fallback when even the smallest retry can't be solved: advance
+// this slice by inertia for time h, forces off, with mass damping kept (so it
+// still dissipates and can't self-sustain). θ/θ̇ are at the slice-start state.
+function coastSubstep(rope, h){
+  const Ns = rope.Ns;
+  const damp = 1 - DAMPING_MASS * h;
+  for(let i = 0; i < Ns; i++){
+    rope.thetaDot[i] *= damp;
+    rope.theta[i]    += h * rope.thetaDot[i];
+  }
+  rope.warmStartValid = false;
+  _rejectThisFrame++;
+  _rejectTotal++;
+}
+
+// Advance one slice of size h. Try the implicit step; if Newton fails, retry
+// as two half-steps (recursively, up to HALVING_MAX_DEPTH) — halving h shrinks
+// the Newton-basin overshoot, so the slice usually becomes solvable — and only
+// coast at the deepest level as a last resort. Because implicitStep leaves
+// θ/θ̇ untouched on failure, the retry just re-runs from the same state; no
+// explicit save/restore needed. Returns true if solved (no coast in subtree).
+function advanceSubstep(rope, h, ax, ay, gamma, depth){
+  if(implicitStep(rope, h, ax, ay, gamma)) return true;
+  if(USE_HALVING && depth < HALVING_MAX_DEPTH){
+    _halveThisFrame++;
+    _halveTotal++;
+    const ok1 = advanceSubstep(rope, h * 0.5, ax, ay, gamma, depth + 1);
+    const ok2 = advanceSubstep(rope, h * 0.5, ax, ay, gamma, depth + 1);
+    return ok1 && ok2;
+  }
+  coastSubstep(rope, h);
+  return false;
 }
 
 // --- Update loop -------------------------------------------------------
@@ -1612,6 +1664,7 @@ export function update(dt){
   let _physMsThisFrame = 0;
   _clampThisFrame = 0;   // reset the live anti-chaos-clamp counter for this frame
   _rejectThisFrame = 0;  // reset the live reject-on-non-convergence counter
+  _halveThisFrame = 0;   // reset the live step-halving counter
   _maxDThetaDot   = 0;   // reset the per-frame peak |Δθ̇| readout
   _maxDThetaDotJoint = -1;
   // Per-frame Newton log, only used when NEWTON_LOG_ENABLED.  Captures
@@ -1624,11 +1677,11 @@ export function update(dt){
     const _physT0 = SHOW_PERF_HUD ? performance.now() : 0;
     for(let s = 0; s < substeps; s++){
       if(isImplicit){
-        implicitStep(rope, h_sub, ax, ay, gamma);
+        const solved = advanceSubstep(rope, h_sub, ax, ay, gamma, 0);
         if(NEWTON_LOG_ENABLED){
-          newtonItersArr[s] = rope.lastNewtonIters;
+          newtonItersArr[s] = rope.lastNewtonIters;   // last sub-attempt's iters
           newtonRelArr[s]   = rope.lastNewtonRelStep;
-          if(rope.lastNewtonConverged) newtonConvCount++;
+          if(solved) newtonConvCount++;               // solved = no coast (possibly via halving)
         }
       } else {
         rk4Step(rope, h_sub, ax, ay);
@@ -1644,8 +1697,8 @@ export function update(dt){
       const NEWTON_NEAR_FAIL_ITERS = NEWTON_MAX_ITERS - 2;   // 6 of 8 = straining
       if(newtonConvCount < substeps || maxIters >= NEWTON_NEAR_FAIL_ITERS){
         const itersStr = newtonItersArr.join(',');
-        const relStr   = newtonRelArr.map(r => Number.isFinite(r) ? r.toExponential(2) : String(r)).join(',');
-        console.log(`[Newton N=${rope.N}] iters=[${itersStr}] relStep=[${relStr}] converged=${newtonConvCount}/${substeps} rejΣ=${_rejectTotal} singBailΣ=${_singularBails} (${INTEGRATOR})`);
+        const relStr   = newtonRelArr.map(r => expFix(r)).join(',');
+        console.log(`[Newton N=${rope.N}] iters=[${itersStr}] relStep=[${relStr}] converged=${newtonConvCount}/${substeps} halveΣ=${_halveTotal} rejΣ=${_rejectTotal} singBailΣ=${_singularBails} (${INTEGRATOR})`);
       }
       newtonConvCount = 0;
     }
@@ -1773,8 +1826,7 @@ export function update(dt){
         if(a > maxDth) maxDth = a;
       }
       bendPE *= 0.5 * kTheta;
-      const ke = Number.isFinite(_logMaxKE) ? _logMaxKE.toExponential(2) : _logMaxKE;
-      console.log(`[E] t=${_eLogTime.toFixed(1)}s  peakKE=${ke}  bendPE=${bendPE.toExponential(2)}  max|Δθ|=${maxDth.toFixed(3)}  peak|aV|=${_logMaxAnchorSpeed.toExponential(2)}  rejΣ=${_rejectTotal}`);
+      console.log(`[E] t=${_eLogTime.toFixed(1)}s  peakKE=${expFix(_logMaxKE)}  bendPE=${expFix(bendPE)}  max|Δθ|=${maxDth.toFixed(3)}  peak|aV|=${expFix(_logMaxAnchorSpeed)}  halveΣ=${_halveTotal}  rejΣ=${_rejectTotal}`);
       _logMaxKE = 0;
       _logMaxAnchorSpeed = 0;
     }
@@ -1881,9 +1933,9 @@ function drawSpringHandle(ctx){
 // shifts whose combined bounding box crosses an edge are drawn, so it costs
 // nothing when everything is on-screen.
 function drawScene(ctx){
-  drawRopeSegments(ctx);
-  drawSpringHandle(ctx);
-  drawAnchorDot(ctx);
+  drawAnchorDot(ctx);      // behind
+  drawSpringHandle(ctx);   // behind
+  drawRopeSegments(ctx);   // chain on top — so near-anchor links aren't hidden by the dot
 }
 
 function drawAlex2(ctx){
@@ -2008,6 +2060,8 @@ document.getElementById('resetDisk')?.addEventListener('click', () => {
   _clampTotal      = 0;
   _rejectThisFrame = 0;
   _rejectTotal     = 0;
+  _halveThisFrame  = 0;
+  _halveTotal      = 0;
   _maxDThetaDotHold      = 0;
   _maxDThetaDotHoldJoint = -1;
   _eLogFrame = 0;
