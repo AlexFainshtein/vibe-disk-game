@@ -125,11 +125,11 @@ const BENDING_EI = 500000;   // continuum flexural rigidity; k_θ = BENDING_EI /
 // keep this in mind when raising the value.
 const DAMPING_BEND = 1000;
 
-// DAMPING_MASS: mass-proportional damping. Subtracts α · θ̇ from θ̈ each
+// VISCOUS_DRAG: viscous drag. Subtracts α · θ̇ from θ̈ each
 // frame, so the time constant of every mode decays at rate α regardless of
 // frequency. Use to slowly bleed off rotation / bulk motion. 0 means the
 // chain coasts indefinitely (only DAMPING_BEND dissipates).
-const DAMPING_MASS = 0.5; // was 0.1, 0
+const VISCOUS_DRAG = 0.5; // was 0.1, 0
 
 // --- Gravity -----------------------------------------------------------
 //
@@ -164,35 +164,12 @@ const NEWTON_MAX_ITERS               = 8;
 const NEWTON_WARM_START              = true;
 // Newton convergence: stop when ‖Δy‖ / max(‖y‖, 1) < NEWTON_TOL.
 const NEWTON_TOL                     = 1e-6;
-// Per-substep angular-velocity-increment clamp (anti-chaos safety net).
-// Caps |Δθ̇| = |h_sub·θ̈| per joint each implicit substep. A fast RIGID spin
-// has θ̈≈0 (no straining), so this is meant to leave normal motion untouched
-// and bite only the exploding regime. *Currently 0 (disabled) for
-// CALIBRATION* — the HUD shows the peak |Δθ̇| so we can read the normal-play
-// demand and the blow-up demand, then set the cap between them. (0.6 was a
-// first guess and engaged during normal play — too low.)
-const MAX_DTHETADOT_PER_SUBSTEP      = 0;
-// PEAK_LOG: when a new |Δθ̇| high-water record above PEAK_LOG_THRESHOLD is set,
-// log the conditions (joint, θ̇, anchor accel ax/ay, which grab is active,
-// warm vs cold start, Newton converged) so we can see WHAT produces the big
-// transients. Console only (test on desktop).
-const PEAK_LOG            = false;  // off during the "first-event" observation — keeps smooth play silent
-const PEAK_LOG_THRESHOLD  = 20;
-
-// REJECT_NONCONVERGED: the anti-chaos safety net. A substep where Newton fails
-// to converge is the blow-up signature (confirmed: legit fast whip stays
-// conv=true even at |θ̇|~425; the explosion flips to conv=false). On such a
-// substep, discard the untrustworthy result and COAST — keep the last good
-// θ̇, advance θ by θ_n + h·θ̇_n. Bounded, injects no energy, and recovers the
-// moment Newton can solve again. This supersedes the magnitude clamp above,
-// which clipped the legitimate whip (large |Δθ̇| but converged).
-const REJECT_NONCONVERGED = true;
 
 // USE_HALVING: the principled recovery before coasting. When a substep's
 // Newton fails, retry it as two half-steps (recursively, up to
 // HALVING_MAX_DEPTH levels) — a smaller h shrinks the Newton-basin overshoot
 // that causes the failure, so the slice usually becomes solvable. Coasting
-// (REJECT_NONCONVERGED) demotes to the last resort, used only if even the
+// is the last resort, used only if even the
 // deepest halving still can't converge. Local: only the failing slice pays
 // the extra cost, so normal play is untouched.
 const USE_HALVING       = true;
@@ -218,18 +195,9 @@ const E_SPIKE_RATIO   = 100;       // log when E_new / E_prev exceeds this
 // chain kinetic energy + max|θ̇| + anchor speed + reject total. For the
 // non-decay investigation: perturb a hands-off chain (Reset, then
 // window.alex2.kickChain()) and watch whether KE falls ~e-fold per 2 s (as
-// DAMPING_MASS=0.5 predicts) or plateaus (energy not leaving). Console only.
+// VISCOUS_DRAG=0.5 predicts) or plateaus (energy not leaving). Console only.
 const ENERGY_DECAY_LOG       = false;  // off — the stream was burying the on-demand dumpTheta() output
 const ENERGY_DECAY_LOG_EVERY = 30;
-
-// --- Trace mode (diagnostic) ------------------------------------------
-//
-// TRACE_ENABLED + TRACE_DURATION_FRAMES: log θ_j every frame for the first
-// N frames after page load / Reset.  Stops automatically on NaN.
-const TRACE_ENABLED         = false; // off — no per-frame console output during test
-const TRACE_DURATION_FRAMES = 600;   // ~10 seconds at 60 Hz — long enough to capture slow-drift explosions
-const TRACE_HEAD            = 5;     // how many θ_j to show from the start of the chain
-const TRACE_TAIL            = 5;     // how many θ_j to show from the end
 
 // Spectral condition-number estimator for M (power iteration for λ_max,
 // inverse power iteration for λ_min, ratio gives κ₂(M)).  Each frame runs
@@ -237,32 +205,6 @@ const TRACE_TAIL            = 5;     // how many θ_j to show from the end
 // the cost of one RK4 step.  Disable when not debugging.
 const CONDITION_ESTIMATE    = false; // off — expensive, not needed for this test
 const CONDITION_ITERS       = 10;
-
-// Per-substep RHS + θ̈ logging for the first SUBSTEP_LOG_HEAD joints.
-// Captures the input (rhs of M·θ̈ = rhs) and output (θ̈) of each of the 4
-// RK4 substeps each frame, so we can see if/where RK4's intermediate
-// derivative estimates are diverging from each other.  Dumped to CSV when
-// tracing stops.
-const SUBSTEP_LOG_ENABLED   = false; // off — no per-substep capture during test
-const SUBSTEP_LOG_HEAD      = 20;
-
-// INPUT_LOG: mouse-input diagnostics, gated alongside the chain trace
-// (starts on first anchor input, stops when tracing stops), so its frame
-// index aligns with the substep log's.  Per-frame units so all three
-// quantities are on the same numerical scale as L ≈ 4 px:
-//   x, y  — anchor position offset, px
-//   vx, vy — px per frame  (= raw position delta this frame)
-//   ax, ay — px per frame²  (= change in velocity-per-frame from last frame)
-const INPUT_LOG_ENABLED         = false; // off — no CSV writing during test
-
-// THETA_LOG: per-frame samples of θ_i at three fixed joint indices
-// (left / middle / right of chain).  Recording starts on the first
-// anchor interaction; dump via window.alex2.dumpThetaLog().  Defaults
-// are for N=14 (Ns=13).  Edit THETA_LOG_I_* if Ns differs.
-const THETA_LOG_ENABLED         = false;
-const THETA_LOG_I_LEFT          = 1;
-const THETA_LOG_I_MID           = 6;
-const THETA_LOG_I_RIGHT         = 11;
 
 // --- Performance HUD (diagnostic) -------------------------------------
 //
@@ -348,10 +290,6 @@ function makeRope(N, baseX, baseY, opts = {}){
     condLambdaMax:    0,
     condLambdaMin:    0,
     condNum:          0,
-    // Per-substep snapshot: deriv copies rope.rhs into lastRhs before
-    // gaussSolve destroys it, so captureSubstep can read the actual RHS
-    // value used for this substep's linear solve.
-    lastRhs:          new Float64Array(Ns),
     // Once E goes non-finite, the warning would fire every frame forever
     // (60×/sec, each a long line) and DevTools eventually freezes. Latch the
     // warning so it fires once per NaN episode; cleared by Reset or by E
@@ -397,147 +335,9 @@ function makeRope(N, baseX, baseY, opts = {}){
 const ropes = [makeRope(N, canvas.width / 2, canvas.height * 0.5)];
 for(const rope of ropes) rope.theta.fill(INITIAL_THETA);   // hang straight down at start
 
-// --- Input-log CSV download -------------------------------------------
-
-// Triggers a browser download of the accumulated input log as a CSV file.
-// Called automatically when the duration runs out, or manually via
-// window.alex2.dumpInputLog().  Reason string ends up in the filename.
-function dumpInputLog(reason = 'manual'){
-  if(typeof window === 'undefined' || typeof document === 'undefined') return;
-  if(inputLogRows.length === 0){
-    console.log('[input] no rows to dump');
-    return;
-  }
-  const header = 'frame,x_px,y_px,vx_pxpf,vy_pxpf,ax_pxpf2,ay_pxpf2\n';
-  const body = inputLogRows.map(r =>
-    r.map((v, i) => i === 0 ? String(v) : (Number.isFinite(v) ? v.toFixed(6) : String(v))).join(',')
-  ).join('\n');
-  const csv = header + body + '\n';
-  const blob = new Blob([csv], { type: 'text/csv' });
-  const url  = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href     = url;
-  a.download = `alex2-input-${Date.now()}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-  console.log(`[input] dumped ${inputLogRows.length} rows to CSV (reason: ${reason})`);
-}
-
-// Dump the per-substep RHS + θ̈ log accumulated in substepLogRows.
-// 4 rows per traced frame (one per RK4 substep), each capturing the
-// first SUBSTEP_LOG_HEAD joints of `rhs` (input to the linear solve)
-// and the resulting `accel` (= θ̈ used by RK4).
-function dumpSubstepLog(reason = 'manual'){
-  if(typeof window === 'undefined' || typeof document === 'undefined') return;
-  if(substepLogRows.length === 0){
-    console.log('[substep] no rows to dump');
-    return;
-  }
-  const head = SUBSTEP_LOG_HEAD;
-  let header = 'frame,substep,shift_y_px,ay_pxps2';
-  for(let i = 0; i < head; i++) header += `,rhs_${i}`;
-  for(let i = 0; i < head; i++) header += `,ddt_${i}`;
-  header += '\n';
-  const body = substepLogRows.map(r => {
-    const parts = [String(r[0] | 0), String(r[1] | 0)];
-    for(let i = 2; i < 4 + 2 * head; i++){
-      const v = r[i];
-      parts.push(Number.isFinite(v) ? v.toExponential(4) : String(v));
-    }
-    return parts.join(',');
-  }).join('\n');
-  const csv = header + body + '\n';
-  const blob = new Blob([csv], { type: 'text/csv' });
-  const url  = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href     = url;
-  a.download = `alex2-substep-${Date.now()}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-  console.log(`[substep] dumped ${substepLogRows.length} rows to CSV (reason: ${reason})`);
-}
-
-// Dump the per-frame θ log accumulated in thetaLogRows.  Each row is
-// [frame, t_seconds, theta_left, theta_mid, theta_right] capturing θ_i
-// at the three configured joint indices.  Gated by THETA_LOG_ENABLED.
-function dumpThetaLog(reason = 'manual'){
-  if(typeof window === 'undefined' || typeof document === 'undefined') return;
-  if(thetaLogRows.length === 0){
-    console.log('[theta] no rows to dump');
-    return;
-  }
-  const header = `frame,t_sec,theta_i${THETA_LOG_I_LEFT},theta_i${THETA_LOG_I_MID},theta_i${THETA_LOG_I_RIGHT}\n`;
-  const body = thetaLogRows.map(r =>
-    r.map((v, i) => i === 0 ? String(v) : (Number.isFinite(v) ? v.toFixed(6) : String(v))).join(',')
-  ).join('\n');
-  const csv = header + body + '\n';
-  const blob = new Blob([csv], { type: 'text/csv' });
-  const url  = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href     = url;
-  a.download = `alex2-theta-${Date.now()}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-  console.log(`[theta] dumped ${thetaLogRows.length} rows to CSV (reason: ${reason})`);
-}
-
-// Dump the current θ and θ̇ of all joints (rope 0) to BOTH a CSV file
-// (spreadsheet-friendly) and a JSON file (full numerical precision for
-// copy-paste back into chat).  Optional `label` becomes part of each
-// filename so before/after snapshots can be told apart.
-function dumpFullState(label = 'state'){
-  if(typeof window === 'undefined' || typeof document === 'undefined') return;
-  const rope = ropes[0];
-  const Ns = rope.Ns;
-  const ts = Date.now();
-
-  // CSV form
-  let csv = 'joint_index,theta,theta_dot\n';
-  for(let i = 0; i < Ns; i++){
-    const t  = rope.theta[i];
-    const td = rope.thetaDot[i];
-    const tStr  = Number.isFinite(t)  ? t.toExponential(15)  : String(t);
-    const tdStr = Number.isFinite(td) ? td.toExponential(15) : String(td);
-    csv += `${i},${tStr},${tdStr}\n`;
-  }
-  triggerDownload(csv, `alex2-state-${label}-${ts}.csv`, 'text/csv');
-
-  // JSON form — full double precision via Array.from + JSON.stringify
-  const json = JSON.stringify({
-    label,
-    timestamp: ts,
-    Ns,
-    theta:    Array.from(rope.theta),
-    thetaDot: Array.from(rope.thetaDot),
-  }, null, 2);
-  triggerDownload(json, `alex2-state-${label}-${ts}.json`, 'application/json');
-
-  console.log(`[state] dumped ${Ns} joints (${label}) — CSV + JSON`);
-}
-
-// Helper for the dump functions: trigger a browser download of `content`
-// with the given filename and MIME type.
-function triggerDownload(content, filename, mimeType){
-  const blob = new Blob([content], { type: mimeType });
-  const url  = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href     = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
 // Debug perturbation: add a smooth half-sine bump to the chain's θ̇ WITHOUT
 // touching the anchor — a clean way to excite the chain and watch it decay in
-// isolation (tests DAMPING_MASS without any anchor forcing). Call from the
+// isolation (tests VISCOUS_DRAG without any anchor forcing). Call from the
 // console: window.alex2.kickChain() (optional amplitude). The energy log then
 // shows whether KE falls off or plateaus.
 function kickChain(amp = 3){
@@ -585,35 +385,13 @@ function dumpTheta(){
 }
 
 // Expose ropes on window for console-side inspection during debugging:
-// `alex2.ropes[0].theta`, etc.  Also exposes dumpInputLog() for manual
-// CSV download.
-if(typeof window !== 'undefined') window.alex2 = { ropes, dumpInputLog, dumpSubstepLog, dumpThetaLog, dumpFullState, kickChain, kickAnchor, dumpTheta };
+// `alex2.ropes[0].theta`, etc.
+if(typeof window !== 'undefined') window.alex2 = { ropes, kickChain, kickAnchor, dumpTheta };
 
-// Trace state: counts frames since page load / last Reset. Tracing waits
-// for the first anchor input (via applyAnchorVelocityImpulse) before
-// recording — otherwise frame 0 would be hundreds of all-zero lines.
-// Stops after TRACE_DURATION_FRAMES or on the first non-finite E.
-let traceFrameCount      = 0;
-let tracingActive        = TRACE_ENABLED;
+// Tracks whether the user has driven the anchor yet (via arrow keys or a
+// drag). Gates NEWTON_LOG so the console isn't flooded with all-zero frames
+// before the first interaction.
 let anchorHasInteracted  = false;
-
-// Input log state — gated alongside the chain trace so frame indices
-// align with the substep log.  Each row uses traceFrameCount as its frame
-// number.  Dumped together with the substep log when tracing stops.
-const inputLogRows = [];   // each row: [frame, x, y, vx, vy, ax, ay]
-
-// Substep log: per (frame, substep) record of the first SUBSTEP_LOG_HEAD
-// values of the conservative RHS and the resulting θ̈.  Active whenever
-// tracing is active; dumped to its own CSV when tracing stops (or on
-// demand via window.alex2.dumpSubstepLog()).
-const substepLogRows   = [];   // each row: [frame, substep, rhs_0..H, ddt_0..H]
-
-// Delta log: per-frame samples of Δθ at three fixed joint indices.
-// Recording starts on first anchor interaction; one row per frame.
-// Dumped on demand via window.alex2.dumpDeltaLog().
-const thetaLogRows     = [];   // each row: [frame, t_sec, theta_left, theta_mid, theta_right]
-let   thetaLogFrameCount = 0;
-let   thetaLogTimeSec    = 0;  // cumulative wall-clock time since logging started
 
 // --- Performance HUD state (smoothed via EMA) -------------------------
 let _perfLastFrameT = 0;      // performance.now() at the previous update() entry
@@ -623,11 +401,6 @@ let _perfRawDtMs    = 0;      // dt actually handed to update() this frame (ms)
 let _perfClamped    = false;  // did dt hit main.js's 33 ms ceiling this frame
 let _perfSubsteps   = 0;      // substeps taken this frame (for the HUD readout)
 const _PERF_EMA     = 0.1;    // smoothing factor for the two timing readouts
-// Anti-chaos clamp engagement counters (per-joint events): this-frame (live)
-// + cumulative since load/Reset. Shown on the HUD so we can see whether the
-// clamp ever fires during normal play (should stay 0) vs only on blow-ups.
-let _clampThisFrame = 0;
-let _clampTotal     = 0;
 // Reject-on-non-convergence counters (substeps coasted because Newton failed).
 let _rejectThisFrame = 0;
 let _rejectTotal     = 0;
@@ -649,14 +422,6 @@ let _eLogFrame = 0;
 let _eLogTime  = 0;
 let _logMaxKE          = 0;
 let _logMaxAnchorSpeed = 0;
-// Peak per-joint |Δθ̇| (= |h_sub·θ̈|) seen this frame, pre-clamp, + which joint.
-// HUD readout for calibrating MAX_DTHETADOT_PER_SUBSTEP from real data.
-let _maxDThetaDot      = 0;
-let _maxDThetaDotJoint = -1;
-// Peak-hold high-water mark (only rises; cleared by Reset) so the value is
-// readable without catching the per-frame flicker.
-let _maxDThetaDotHold      = 0;
-let _maxDThetaDotHoldJoint = -1;
 
 // --- Anchor state (shared across both ropes) ---------------------------
 
@@ -1036,14 +801,13 @@ function applyAnchorVelocityImpulse(dvx, dvy){
 function deriv(rope, theta, thetaDot, ax, ay, out){
   buildMassMatrix(rope, theta);
   buildRhs(rope, theta, thetaDot, ax, ay);
-  if(SUBSTEP_LOG_ENABLED) rope.lastRhs.set(rope.rhs);    // snapshot before solveLinear destroys it
   solveLinear(rope);                                      // fills rope.accel = θ̈
   const Ns = rope.Ns;
-  // Mass-proportional damping: θ̈ ← θ̈ − α · θ̇ (uniform exponential decay
-  // of every mode at rate DAMPING_MASS).
-  if(DAMPING_MASS !== 0){
+  // Viscous drag: θ̈ ← θ̈ − α · θ̇ (uniform exponential decay
+  // of every mode at rate VISCOUS_DRAG).
+  if(VISCOUS_DRAG !== 0){
     for(let i = 0; i < Ns; i++){
-      rope.accel[i] -= DAMPING_MASS * thetaDot[i];
+      rope.accel[i] -= VISCOUS_DRAG * thetaDot[i];
     }
   }
   for(let i = 0; i < Ns; i++){
@@ -1089,26 +853,6 @@ function computeChainMetrics(rope){
   rope.maxLThetaDot = maxAbs * rope.segmentLength;
 }
 
-// Append one row to substepLogRows capturing the RHS (snapshot taken by
-// deriv before the linear solve) and the resulting θ̈ for the first
-// SUBSTEP_LOG_HEAD joints.  Gated on tracingActive + anchorHasInteracted
-// so it lines up with the chain trace timeline.
-function captureSubstep(rope, substepIdx){
-  if(!SUBSTEP_LOG_ENABLED || !tracingActive || !anchorHasInteracted) return;
-  const head = Math.min(rope.Ns, SUBSTEP_LOG_HEAD);
-  // Row layout: [frame, substep, shift_y, ay, rhs_0..head-1, ddt_0..head-1]
-  const row = new Float64Array(4 + 2 * head);
-  row[0] = traceFrameCount;
-  row[1] = substepIdx;
-  row[2] = _frameShiftY;
-  row[3] = _frameAy;
-  for(let i = 0; i < head; i++){
-    row[4 + i]        = rope.lastRhs[i];
-    row[4 + head + i] = rope.accel[i];
-  }
-  substepLogRows.push(row);
-}
-
 // One RK4 step on (θ, θ̇) advancing by h. Anchor acceleration (ax, ay) is
 // treated as constant over the step.
 function rk4Step(rope, h, ax, ay){
@@ -1126,7 +870,6 @@ function rk4Step(rope, h, ax, ay){
 
   // k1 = f(y)
   deriv(rope, theta, thetaDot, ax, ay, k1);
-  captureSubstep(rope, 1);
 
   // k2 = f(y + h/2 · k1)
   for(let i = 0; i < Ns; i++){
@@ -1134,7 +877,6 @@ function rk4Step(rope, h, ax, ay){
     thetaDotTmp[i] = thetaDot[i] + (h * 0.5) * k1[Ns + i];
   }
   deriv(rope, thetaTmp, thetaDotTmp, ax, ay, k2);
-  captureSubstep(rope, 2);
 
   // k3 = f(y + h/2 · k2)
   for(let i = 0; i < Ns; i++){
@@ -1142,7 +884,6 @@ function rk4Step(rope, h, ax, ay){
     thetaDotTmp[i] = thetaDot[i] + (h * 0.5) * k2[Ns + i];
   }
   deriv(rope, thetaTmp, thetaDotTmp, ax, ay, k3);
-  captureSubstep(rope, 3);
 
   // k4 = f(y + h · k3)
   for(let i = 0; i < Ns; i++){
@@ -1150,7 +891,6 @@ function rk4Step(rope, h, ax, ay){
     thetaDotTmp[i] = thetaDot[i] + h * k3[Ns + i];
   }
   deriv(rope, thetaTmp, thetaDotTmp, ax, ay, k4);
-  captureSubstep(rope, 4);
 
   // y_new = y + h/6 · (k1 + 2·k2 + 2·k3 + k4)
   const h6 = h / 6;
@@ -1171,7 +911,7 @@ function rk4Step(rope, h, ax, ay){
 // (theta, thetaDot) with the midpoint acceleration ddt already computed.
 // Reads rope.M_snap as the pristine M(theta); writes rope.A_raw, rope.B_raw.
 //
-// Mass damping is folded in by treating the EOM RHS as
+// Viscous drag is folded in by treating the EOM RHS as
 //   b_full = Q_anchor − C + q_bend + q_strain − α · M · θ̇,
 // so M · θ̈ = b_full.  The −α·M·θ̇ piece adds −α·(∂M/∂θ_k)·θ̇ to ∂b/∂θ
 // and −α·M to ∂b/∂θ̇.  Both fold into the formulas below.
@@ -1194,7 +934,7 @@ function buildJacobianBlocks(rope, theta, thetaDot, ddt, ax, ay){
   // w_j := α·θ̇_j + ddt_j — single vector to contract with (∂M/∂θ_k),
   // capturing both the −(∂M/∂θ_k)·ddt term in the A_raw formula and the
   // −α·(∂M/∂θ_k)·θ̇ piece coming from differentiating −α·M·θ̇ in b_full.
-  for(let i = 0; i < Ns; i++) w[i] = DAMPING_MASS * thetaDot[i] + ddt[i];
+  for(let i = 0; i < Ns; i++) w[i] = VISCOUS_DRAG * thetaDot[i] + ddt[i];
 
   // S_i := Σ_j L²·μ_{ij}·sin(θ_i − θ_j)·w_j — used on the i==k diagonal
   // of the M-derivative contribution to A_raw.
@@ -1262,7 +1002,7 @@ function buildJacobianBlocks(rope, theta, thetaDot, ddt, ax, ay){
     for(let mm = 0; mm < Ns; mm++){
       const muJM = (Ns - Math.max(j, mm)) * m;
       B[j * Ns + mm] -= 2 * L2 * muJM * Math.sin(theta[j] - theta[mm]) * thetaDot[mm];
-      B[j * Ns + mm] -= DAMPING_MASS * M[j * Ns + mm];
+      B[j * Ns + mm] -= VISCOUS_DRAG * M[j * Ns + mm];
     }
   }
 
@@ -1327,7 +1067,7 @@ function implicitStep(rope, h, ax, ay, gamma){
   thetaDotN.set(thetaDot);
 
   // Initial guess for the Newton iterate y_{n+1}^(0).
-  const usedWarm = NEWTON_WARM_START && rope.warmStartValid;   // captured for PEAK_LOG
+  const usedWarm = NEWTON_WARM_START && rope.warmStartValid;
   if(usedWarm){
     // Warm start: linear extrapolation from the previous converged substep's
     // realized increment, y⁰ = y_n + Δy_prev.  Bounded physical motion, so it
@@ -1342,15 +1082,15 @@ function implicitStep(rope, h, ax, ay, gamma){
   } else {
     // Cold start: one explicit-Euler step, y⁰ = y_n + h·f(y_n).  Used on the
     // first substep after Reset / impulse / a non-converged step.  We fold
-    // mass damping into b_full here for consistency with the Newton loop.
+    // viscous drag into b_full here for consistency with the Newton loop.
     buildMassMatrix(rope, thetaN);
     Msnap.set(rope.M);
     buildRhs(rope, thetaN, thetaDotN, ax, ay);
-    if(DAMPING_MASS !== 0){
+    if(VISCOUS_DRAG !== 0){
       for(let i = 0; i < Ns; i++){
         let s = 0;
         for(let j = 0; j < Ns; j++) s += Msnap[i * Ns + j] * thetaDotN[j];
-        rope.rhs[i] -= DAMPING_MASS * s;
+        rope.rhs[i] -= VISCOUS_DRAG * s;
       }
     }
     solveLinear(rope);
@@ -1380,11 +1120,11 @@ function implicitStep(rope, h, ax, ay, gamma){
     buildMassMatrix(rope, thetaEval);
     Msnap.set(rope.M);
     buildRhs(rope, thetaEval, thetaDotEval, ax, ay);
-    if(DAMPING_MASS !== 0){
+    if(VISCOUS_DRAG !== 0){
       for(let i = 0; i < Ns; i++){
         let s = 0;
         for(let j = 0; j < Ns; j++) s += Msnap[i * Ns + j] * thetaDotEval[j];
-        rope.rhs[i] -= DAMPING_MASS * s;
+        rope.rhs[i] -= VISCOUS_DRAG * s;
       }
     }
     solveLinear(rope);
@@ -1438,25 +1178,6 @@ function implicitStep(rope, h, ax, ay, gamma){
   // caller (advanceSubstep) can retry this slice as half-steps before any
   // coast. The coast itself now lives in coastSubstep(), used as last resort.
   if(converged){
-    // Peak |Δθ̇| tracking for the HUD/log (+ optional magnitude clamp, off by
-    // default) — on the converged increment only.
-    const cap = MAX_DTHETADOT_PER_SUBSTEP;
-    for(let i = 0; i < Ns; i++){
-      let d = thetaDotNew[i] - thetaDotN[i];
-      const ad = Math.abs(d);
-      if(ad > _maxDThetaDot){ _maxDThetaDot = ad; _maxDThetaDotJoint = i; }
-      if(ad > _maxDThetaDotHold){
-        _maxDThetaDotHold = ad; _maxDThetaDotHoldJoint = i;
-        if(PEAK_LOG && ad > PEAK_LOG_THRESHOLD){
-          console.log(`[peak] Δθ̇=${ad.toFixed(1)} @j${i}/${Ns} θ̇=${thetaDotNew[i].toFixed(1)} ax=${ax.toFixed(0)} ay=${ay.toFixed(0)} h=${h.toFixed(4)} ${handleHeld ? 'HANDLE' : anchorHeld ? 'ANCHOR' : 'idle'} ${usedWarm ? 'warm' : 'COLD'} conv=${converged}`);
-        }
-      }
-      if(cap > 0){
-        if(!(d < cap))       { d =  cap; _clampThisFrame++; _clampTotal++; }
-        else if(!(d > -cap)) { d = -cap; _clampThisFrame++; _clampTotal++; }
-        thetaDotNew[i] = thetaDotN[i] + d;
-      }
-    }
     // Warm-start seed for the next substep = this realized increment.
     const prevDTheta    = rope.prevDTheta;
     const prevDThetaDot = rope.prevDThetaDot;
@@ -1483,11 +1204,11 @@ function implicitStep(rope, h, ax, ay, gamma){
 }
 
 // Last-resort fallback when even the smallest retry can't be solved: advance
-// this slice by inertia for time h, forces off, with mass damping kept (so it
+// this slice by inertia for time h, forces off, with viscous drag kept (so it
 // still dissipates and can't self-sustain). θ/θ̇ are at the slice-start state.
 function coastSubstep(rope, h){
   const Ns = rope.Ns;
-  const damp = 1 - DAMPING_MASS * h;
+  const damp = 1 - VISCOUS_DRAG * h;
   for(let i = 0; i < Ns; i++){
     rope.thetaDot[i] *= damp;
     rope.theta[i]    += h * rope.thetaDot[i];
@@ -1557,10 +1278,10 @@ export function update(dt){
   }
 
   // ax, ay are the anchor's smoothed acceleration over this frame, fed to
-  // Q_anchor inside the RK4 evaluations.  For the mouse-drag path we use
-  // this smooth delivery instead of an instantaneous Δv impulse — same
+  // Q_anchor inside the substep force evaluations.  For the mouse-drag path we
+  // use this smooth delivery instead of an instantaneous Δv impulse — same
   // total Δθ̇ is transferred to the chain over the frame, but distributed
-  // across RK4 substeps so the substep θ̇ values stay small (and Coriolis
+  // across the substeps so the substep θ̇ values stay small (and Coriolis
   // ∝ θ̇² stays much smaller during evaluation).  Arrow keys still use the
   // impulse path inside the keydown handler.
   let ax = 0, ay = 0;
@@ -1604,19 +1325,6 @@ export function update(dt){
     ax = (newAnchorVx - anchorVx) / h;
     ay = (newAnchorVy - anchorVy) / h;
     if(ax !== 0 || ay !== 0) anchorHasInteracted = true;
-
-    // Input log: per-frame units (px, px/frame, px/frame²).  Gated on
-    // tracingActive + anchorHasInteracted so the frame index aligns with
-    // the substep log's frame index (both count from the first mouse
-    // motion).  Accumulated in memory and dumped together with the substep
-    // log when tracing stops.
-    if(INPUT_LOG_ENABLED && tracingActive && anchorHasInteracted){
-      const vx_pf  = newAnchorVx * h;   // = anchorDeltaX − prevAnchorDeltaX
-      const vy_pf  = newAnchorVy * h;
-      const ax_pf2 = ax * h * h;        // = (newAnchorV − anchorV) · h
-      const ay_pf2 = ay * h * h;
-      inputLogRows.push([traceFrameCount, anchorDeltaX, anchorDeltaY, vx_pf, vy_pf, ax_pf2, ay_pf2]);
-    }
 
     anchorVx = newAnchorVx;
     anchorVy = newAnchorVy;
@@ -1662,11 +1370,8 @@ export function update(dt){
   // (the diagnostic monitors below are excluded so this reads as the
   // shippable physics cost). EMA-folded into _perfPhysicsMs after the loop.
   let _physMsThisFrame = 0;
-  _clampThisFrame = 0;   // reset the live anti-chaos-clamp counter for this frame
   _rejectThisFrame = 0;  // reset the live reject-on-non-convergence counter
   _halveThisFrame = 0;   // reset the live step-halving counter
-  _maxDThetaDot   = 0;   // reset the per-frame peak |Δθ̇| readout
-  _maxDThetaDotJoint = -1;
   // Per-frame Newton log, only used when NEWTON_LOG_ENABLED.  Captures
   // (iters, relStep, converged) for every substep across every rope so we
   // can spot Newton failures or near-failures.
@@ -1702,23 +1407,6 @@ export function update(dt){
       }
       newtonConvCount = 0;
     }
-    // Per-frame θ samples at three fixed joint indices.  Recording starts
-    // on first anchor interaction so frame 0 isn't a flood of all-zero rows.
-    if(THETA_LOG_ENABLED && anchorHasInteracted && rope === ropes[0]){
-      const Ns = rope.Ns;
-      const iL = THETA_LOG_I_LEFT, iM = THETA_LOG_I_MID, iR = THETA_LOG_I_RIGHT;
-      if(iL < Ns && iM < Ns && iR < Ns){
-        thetaLogTimeSec += h;
-        thetaLogRows.push([
-          thetaLogFrameCount,
-          thetaLogTimeSec,
-          rope.theta[iL],
-          rope.theta[iM],
-          rope.theta[iR],
-        ]);
-        thetaLogFrameCount++;
-      }
-    }
     if(CONDITION_ESTIMATE) estimateConditionNumber(rope);
     if(ENERGY_MONITOR){
       rope.prevE             = rope.E;
@@ -1744,63 +1432,6 @@ export function update(dt){
 
   if(SHOW_PERF_HUD){
     _perfPhysicsMs += (_physMsThisFrame - _perfPhysicsMs) * _PERF_EMA;
-  }
-
-  // Trace logging: three lines per frame per rope — a header with frame
-  // number, E, and |θ̇|max; then θ values (head+tail); then θ̇ values
-  // (same format).  Waits for the first anchor input, runs for
-  // TRACE_DURATION_FRAMES frames or until E goes non-finite.
-  if(tracingActive && anchorHasInteracted){
-    const fmtT = (x) => {
-      if(!Number.isFinite(x)) return '    NaN';
-      // toFixed falls back to full-precision exponential for |x| ≥ 1e21,
-      // producing 20-char mantissas. Switch to short exponential ourselves
-      // once the value leaves a "moderate" band.
-      const ax = Math.abs(x);
-      if(ax >= 1e4 || (ax > 0 && ax < 1e-3)){
-        return x.toExponential(2).padStart(10);
-      }
-      return x.toFixed(3).padStart(7);
-    };
-    const fmtE = (x) => Number.isFinite(x) ? x.toExponential(2) : String(x);
-    const fmtArr = (arr) => {
-      const n = arr.length;
-      if(n <= TRACE_HEAD + TRACE_TAIL){
-        return Array.from(arr).map(fmtT).join(' ');
-      }
-      const headPart = [];
-      for(let i = 0; i < TRACE_HEAD; i++) headPart.push(fmtT(arr[i]));
-      const tailPart = [];
-      for(let i = n - TRACE_TAIL; i < n; i++) tailPart.push(fmtT(arr[i]));
-      return `${headPart.join(' ')}  …  ${tailPart.join(' ')}`;
-    };
-    for(const rope of ropes){
-      const td = rope.maxThetaDot;
-      const tdMaxStr = !Number.isFinite(td)
-        ? String(td)
-        : (Math.abs(td) >= 1e4 ? td.toExponential(2) : td.toFixed(2)).padStart(8);
-      const prStr = Number.isFinite(rope.pivotRatio) ? rope.pivotRatio.toExponential(5) : String(rope.pivotRatio);
-      const kStr  = Number.isFinite(rope.condNum)    ? rope.condNum.toExponential(3)    : String(rope.condNum);
-      const lminStr = Number.isFinite(rope.condLambdaMin) ? rope.condLambdaMin.toExponential(3) : String(rope.condLambdaMin);
-      const lmaxStr = Number.isFinite(rope.condLambdaMax) ? rope.condLambdaMax.toExponential(3) : String(rope.condLambdaMax);
-      console.log(`[trace f=${String(traceFrameCount).padStart(3, '0')}] N=${rope.N} E=${fmtE(rope.E)} |θ̇|max=${tdMaxStr}  pivotRatio=${prStr}  κ=${kStr} (λ_min=${lminStr}, λ_max=${lmaxStr})`);
-      console.log(`              θ =[${fmtArr(rope.theta)}]`);
-      console.log(`              θ̇ =[${fmtArr(rope.thetaDot)}]`);
-      if(!Number.isFinite(rope.E)){
-        console.log(`[trace] stopped at frame ${traceFrameCount} — non-finite E`);
-        tracingActive = false;
-        if(SUBSTEP_LOG_ENABLED) dumpSubstepLog('non-finite E');
-        if(INPUT_LOG_ENABLED)   dumpInputLog('non-finite E (paired with substep)');
-        break;
-      }
-    }
-    traceFrameCount++;
-    if(tracingActive && traceFrameCount >= TRACE_DURATION_FRAMES){
-      console.log(`[trace] stopped at frame ${traceFrameCount} — duration reached`);
-      tracingActive = false;
-      if(SUBSTEP_LOG_ENABLED) dumpSubstepLog('duration reached');
-      if(INPUT_LOG_ENABLED)   dumpInputLog('trace duration reached (paired with substep)');
-    }
   }
 
   // Energy-decay logger: every frame, accumulate the PEAK chain KE and PEAK
@@ -1987,7 +1618,6 @@ function drawPerfHud(ctx){
     `physics ${_perfPhysicsMs.toFixed(1)} ms   (${physPct.toFixed(0)}% of frame)`,
     `dt ${_perfRawDtMs.toFixed(1)} ms${_perfClamped ? '   ⚠ CLAMPED@33' : ''}`,
     `N=${N}  substeps=${_perfSubsteps}  ${INTEGRATOR}`,
-    `Δθ̇ now ${_maxDThetaDot.toFixed(1)}  max ${_maxDThetaDotHold.toFixed(1)} @j${_maxDThetaDotHoldJoint}  cap ${MAX_DTHETADOT_PER_SUBSTEP || 'off'}`,
     `reject ${_rejectThisFrame}/frame   (Σ${_rejectTotal})`,
   ];
 
@@ -2002,9 +1632,9 @@ function drawPerfHud(ctx){
   ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
   ctx.fillRect(8, 8, maxW + pad * 2, lines.length * lh + pad * 2);
   for(let i = 0; i < lines.length; i++){
-    // Amber alarm: dt-clamp line (i=2) while clamped; reject line (i=5) on any
+    // Amber alarm: dt-clamp line (i=2) while clamped; reject line (i=4) on any
     // frame the anti-chaos safety net coasted a non-converged substep.
-    const alarm = (i === 2 && _perfClamped) || (i === 5 && _rejectThisFrame > 0);
+    const alarm = (i === 2 && _perfClamped) || (i === 4 && _rejectThisFrame > 0);
     ctx.fillStyle = alarm ? '#e8b84b' : 'rgba(235, 242, 248, 0.92)';
     ctx.fillText(lines[i], 8 + pad, 8 + pad + i * lh);
   }
@@ -2051,30 +1681,12 @@ document.getElementById('resetDisk')?.addEventListener('click', () => {
     rope.condNum    = 0;
     updateParticlePositions(rope);
   }
-  // Re-arm trace for the next test run.
-  traceFrameCount      = 0;
-  tracingActive        = TRACE_ENABLED;
   anchorHasInteracted  = false;
-  // Reset the anti-chaos counters and the Δθ̇ peak-hold.
-  _clampThisFrame  = 0;
-  _clampTotal      = 0;
+  // Reset the anti-chaos counters.
   _rejectThisFrame = 0;
   _rejectTotal     = 0;
   _halveThisFrame  = 0;
   _halveTotal      = 0;
-  _maxDThetaDotHold      = 0;
-  _maxDThetaDotHoldJoint = -1;
   _eLogFrame = 0;
   _eLogTime  = 0;
-  // Re-arm input log too (any unsaved rows are discarded; user should call
-  // window.alex2.dumpInputLog() first if they want to keep them).
-  inputLogRows.length = 0;
-  // Re-arm substep log (any unsaved rows are discarded; user should call
-  // window.alex2.dumpSubstepLog() first if they want to keep them).
-  substepLogRows.length = 0;
-  // Re-arm θ log (any unsaved rows are discarded; user should call
-  // window.alex2.dumpThetaLog() first if they want to keep them).
-  thetaLogRows.length = 0;
-  thetaLogFrameCount  = 0;
-  thetaLogTimeSec     = 0;
 });

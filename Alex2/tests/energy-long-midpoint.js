@@ -1,5 +1,5 @@
 // Long-duration energy + Newton-convergence test that mirrors current
-// production: linear bending, full M(θ) + Coriolis + mass damping +
+// production: linear bending, full M(θ) + Coriolis + viscous drag +
 // strain-rate damping, implicit midpoint (γ=0.5).
 //
 // Scenario: spin the chain up with a brief intense ay impulse, then
@@ -16,7 +16,7 @@
 // === Constants (match production alex2-physics.js) ===
 const BENDING_EI         = 100;
 const DAMPING_BEND       = 1;
-const DAMPING_MASS       = 0.1;
+const VISCOUS_DRAG       = 0.1;
 const NEWTON_MAX_ITERS   = 12;
 const NEWTON_TOL         = 1e-8;
 
@@ -131,7 +131,7 @@ function buildJacobianBlocks(rope, theta, thetaDot, ddt, ax, ay){
   const A = rope.A_raw, B = rope.B_raw, M = rope.M_snap;
   const w = rope.tmpNs, S = rope.tmpNs2;
   A.fill(0); B.fill(0);
-  for(let i = 0; i < Ns; i++) w[i] = DAMPING_MASS * thetaDot[i] + ddt[i];
+  for(let i = 0; i < Ns; i++) w[i] = VISCOUS_DRAG * thetaDot[i] + ddt[i];
   for(let i = 0; i < Ns; i++){
     let s = 0;
     for(let j = 0; j < Ns; j++){
@@ -175,7 +175,7 @@ function buildJacobianBlocks(rope, theta, thetaDot, ddt, ax, ay){
     for(let mm = 0; mm < Ns; mm++){
       const muJM = (Ns - Math.max(j, mm)) * m;
       B[j * Ns + mm] -= 2 * L2 * muJM * Math.sin(theta[j] - theta[mm]) * thetaDot[mm];
-      B[j * Ns + mm] -= DAMPING_MASS * M[j * Ns + mm];
+      B[j * Ns + mm] -= VISCOUS_DRAG * M[j * Ns + mm];
     }
   }
   if(DAMPING_BEND !== 0 && Ns >= 2){
@@ -205,11 +205,11 @@ function implicitStep(rope, h, ax, ay, gamma){
   buildMassMatrix(rope, thetaN);
   Msnap.set(rope.M);
   buildRhs(rope, thetaN, thetaDotN, ax, ay);
-  if(DAMPING_MASS !== 0){
+  if(VISCOUS_DRAG !== 0){
     for(let i = 0; i < Ns; i++){
       let s = 0;
       for(let j = 0; j < Ns; j++) s += Msnap[i * Ns + j] * thetaDotN[j];
-      rope.rhs[i] -= DAMPING_MASS * s;
+      rope.rhs[i] -= VISCOUS_DRAG * s;
     }
   }
   gaussSolve(Ns, rope.M, rope.rhs, rope.accel);
@@ -228,11 +228,11 @@ function implicitStep(rope, h, ax, ay, gamma){
     buildMassMatrix(rope, thetaEval);
     Msnap.set(rope.M);
     buildRhs(rope, thetaEval, thetaDotEval, ax, ay);
-    if(DAMPING_MASS !== 0){
+    if(VISCOUS_DRAG !== 0){
       for(let i = 0; i < Ns; i++){
         let s = 0;
         for(let j = 0; j < Ns; j++) s += Msnap[i * Ns + j] * thetaDotEval[j];
-        rope.rhs[i] -= DAMPING_MASS * s;
+        rope.rhs[i] -= VISCOUS_DRAG * s;
       }
     }
     gaussSolve(Ns, rope.M, rope.rhs, rope.accel);
@@ -314,7 +314,7 @@ function runScenario(label, Ns, L, m, gamma, h_sub, forcingFn, totalFrames, snap
   console.log(`\n=== ${label} ===`);
   console.log(`  Ns=${Ns}, L=${L.toFixed(3)}, m=${m.toFixed(4)}, h_sub=${h_sub.toFixed(6)}, γ=${gamma}`);
   console.log(`  Total substeps: ${totalFrames}, total time: ${(totalFrames * h_sub).toFixed(2)}s`);
-  console.log(`  Damping: BEND=${DAMPING_BEND}, MASS=${DAMPING_MASS}, BENDING_EI=${BENDING_EI}`);
+  console.log(`  Damping: BEND=${DAMPING_BEND}, MASS=${VISCOUS_DRAG}, BENDING_EI=${BENDING_EI}`);
   console.log(`\n  ${'substep'.padStart(8)} ${'time(s)'.padStart(8)} ${'maxθ'.padStart(10)} ${'maxθ̇'.padStart(12)} ${'maxΔθ'.padStart(10)} ${'Ek'.padStart(11)} ${'V'.padStart(11)} ${'E_total'.padStart(11)} ${'iters'.padStart(6)} ${'relStep'.padStart(10)} ${'conv'.padStart(5)}`);
   let totalIters = 0, nonConvergeCount = 0, maxIterSeen = 0;
   for(let s = 0; s < totalFrames; s++){

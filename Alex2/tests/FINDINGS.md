@@ -30,7 +30,7 @@ Replicates the production scenario: N=99 chain at production parameters, applies
 
 - Chain responds smoothly. max|θ̇| peaks around 20, decays to ~4 over 0.6 sec.
 - max|Δθ| stays at 0.19 throughout (well below π/4).
-- Energy injected: ~4900 J (per the brief impulse). Decays at the mass-damping rate α=0.1 → 10s time-constant.
+- Energy injected: ~4900 J (per the brief impulse). Decays at the viscous-drag rate α=0.1 → 10s time-constant.
 - Newton converges in 1–3 iters every step.
 - **No chaos, no explosion. Brief impulses are well-behaved.**
 

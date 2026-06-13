@@ -2,169 +2,132 @@
 
 Alex2's variant of the Vibe Disk Game — a **rope/chain physics sandbox** in reduced (joint-angle) coordinates. Auto-loaded into context via the `@`-import in [CLAUDE.md](CLAUDE.md). Read [CLAUDE.md](CLAUDE.md) first for shared concepts (engine, playfield, render/input/controls).
 
-Alex2 is the second of Alex's chain experiments. The first variant (see git history — branch `Alex2: new variant — Verlet rope sandbox with adaptive XPBD constraint solver`) used Verlet + position-based dynamics. This one explores the *Lagrangian / reduced-coordinate* approach instead: each rope is parameterized by its N−1 joint angles, distance constraints are exact by construction, and the equations of motion come from analytical mechanics rather than constraint projection.
+This doc describes the **current state**. The investigation history — dead-ends, dated findings, the reasoning behind each choice — lives in git, [Alex2/tests/FINDINGS.md](Alex2/tests/FINDINGS.md), and the session notes, not here.
+
+Alex2 parameterizes the rope by its N−1 joint angles: distance constraints are exact by construction, and the equations of motion come from Lagrangian mechanics rather than constraint projection. (An earlier Verlet/XPBD variant of Alex2 lives in git history.)
 
 ## Entry page
 
-- [alex2.html](Alex2/alex2.html) — sets `<body data-player="alex2">` so [main.js](main.js) dynamically imports `alex2-physics.js`. Single button in `#panel`: Reset. The disk and bar are deliberately disabled (`bar.hidden = true`, `inputHooks.diskGrab = false`, `setDiskRadiusFraction(0)`); the playfield exists only as a backdrop for the chain.
+- [alex2.html](Alex2/alex2.html) — sets `<body data-player="alex2">` so [main.js](main.js) dynamically imports `alex2-physics.js`. Single button in `#panel`: Reset. The **shared engine** disk and bar are deliberately disabled (`bar.hidden = true`, `inputHooks.diskGrab = false`, `setDiskRadiusFraction(0)`); the playfield exists only as a backdrop for the chain.
 
 ## What Alex2 is
 
 Grab the big **handle** and whip the chain around. The handle drives a **spring**, the spring drives the **anchor** (the chain head), and the chain hangs off the anchor under **gravity**. The chain starts hanging straight down; the handle starts above the anchor.
 
-A single chain is drawn by default (`N = 50`; was 100 — see the perf note in Known limitations). The factory `makeRope` and the array-of-ropes structure are kept so the variant can be extended to a multi-rope comparison view (e.g. N=50 vs N=100, same anchor input) by pushing additional `makeRope(...)` calls into the `ropes` array — useful for verifying N-invariance after future integrator changes.
+A single chain is drawn by default (`N = 50`). The factory `makeRope` and the array-of-ropes structure are kept so the variant can be extended to a multi-rope comparison view (e.g. N=50 vs N=100, same anchor input) by pushing more `makeRope(...)` calls into the `ropes` array — useful for verifying N-invariance.
 
 Input:
 - **Mouse drag on the handle** — spring mode (the shipping control). The finger moves the handle; the anchor is a spring-mass-damper that chases it. The handle has **no L/R clamp** — drag it off one side and it wraps to the other; grab detection is wrap-aware so it's never lost. Released, the handle **stays where you left it** (it has no gravity — it's the control point). Vertically it's clamped on-screen (no vertical wrap).
-- **Mouse drag on the small anchor dot** — direct mode (testing): the finger pins the anchor rigidly, bypassing the spring. This re-exposes the hard-jerk blow-up, so it's a test handle only, not for the end user.
-- **Arrow keys** — bounded velocity impulse (`ANCHOR_KEY_VELOCITY_STEP` px/s per press) delivered as an instantaneous angular-momentum kick to the chain.
+- **Mouse drag on the small anchor dot** — direct mode (testing): the finger pins the anchor rigidly, bypassing the spring's low-pass. This drives the solver hardest (the `Δv/h` forcing path), so it's a test handle, not for the end user.
+- **Arrow keys** — step the anchor's velocity by ±`ANCHOR_KEY_VELOCITY_STEP` px/s per press. The anchor's sudden velocity change jerks the chain — applied as a one-step impulse (`M·Δθ̇ = L·μ_jj·(sin θ·Δv_x − cos θ·Δv_y)`) so the chain responds immediately rather than being dragged over frames.
 
 ### Mouse→anchor spring, handle, gravity, wrap
 
-- **Spring (low-pass on the forcing).** The anchor's acceleration fed to `Q_anchor` is the spring force / mass — `K·stretch`, a function of *displacement*, not `Δv/h`. So a fast jerk or a clamped (slow) frame can't manufacture a huge `ax` the way the old finger-pinned anchor could. This is what turned the irrecoverable hard-jerk NaN into a *recoverable* transient (a brief Newton-struggle / fps dip that self-heals). Constants: `SPRING_K`, `SPRING_DAMP`, `ANCHOR_MASS`, `SPRING_REST_FRAC`. Direct anchor mode keeps the old `ax = Δv/h` path for testing.
-- **Gravity** (`GRAVITY`, px/s²; 0 disables). Acts on the chain as a generalized force `Q_grav_j = g·L·μ_jj·cos θ_j` (so θ=π/2 / straight-down is the equilibrium) and on the anchor body (`ay += g`). It does **not** act on the spring or handle (kinematic control elements). Added to `buildRhs` *and* its θ-derivative to the Newton Jacobian in `buildJacobianBlocks`, so the implicit solve stays consistent. Equivalence-principle-consistent: if the anchor free-falls, `Q_anchor`'s `−cos θ_j·ay` cancels `Q_grav`, so a free-falling chain doesn't spuriously deform.
-- **Toroidal wrap — horizontal only** (`USE_CHAIN_WRAP`). The whole movable scene (chain + spring + anchor dot + handle) is drawn once per needed canvas shift via `ctx.translate`, letting the canvas clip — uniform across all elements, no per-element math. Only L↔R; vertical wrap is deliberately off because with gravity the chain hangs down and a fallen chain teleporting to the top reads badly. The wrap test includes the handle's radius so the opposite-side image doesn't flicker. Drop the height term back in `drawAlex2` to re-enable full wrap.
+- **Spring (low-pass on the forcing).** The anchor's acceleration fed to `Q_anchor` is the spring force / mass — `K·stretch`, a function of *displacement*, not `Δv/h`. So a fast jerk or a clamped (slow) frame can't manufacture a huge `ax` the way a finger-pinned anchor can — the forcing is bounded by geometry, not by frame timing. Constants: `SPRING_K`, `SPRING_DAMP`, `ANCHOR_MASS`, `SPRING_REST_FRAC`. (Direct anchor mode keeps the raw `ax = Δv/h` path for testing.)
+- **Gravity** (`GRAVITY`, px/s²; 0 disables). Acts on the chain as a generalized force `Q_grav_j = g·L·μ_jj·cos θ_j` (so θ=π/2 / straight-down is the equilibrium) and on the anchor body (`ay += g`). It does **not** act on the spring or handle (kinematic control elements). Added to `buildRhs` *and* its θ-derivative to the Newton Jacobian in `buildJacobianBlocks`, so the implicit solve stays consistent. Equivalence-principle-consistent: if the anchor free-falls, `Q_anchor`'s `−cos θ_j·ay` exactly cancels `Q_grav`, so a free-falling chain doesn't spuriously deform.
+- **Toroidal wrap — horizontal only** (`USE_CHAIN_WRAP`). The whole movable scene (chain + spring + anchor dot + handle) is drawn once per needed canvas shift via `ctx.translate`, letting the canvas clip — uniform across all elements, no per-element math. Only L↔R; vertical wrap is deliberately off because with gravity the chain hangs down and a fallen chain teleporting to the top reads badly. Drop the height term back in `drawAlex2` to re-enable full wrap.
 
 ## Physics model
 
-Each chain is parameterized by N−1 joint angles `θ_k` (one per segment). The state vector is `[θ, θ̇]`, total 2(N−1) components. Distance constraints are exact: every segment has length L, no stretching is possible by construction.
+Each chain is parameterized by N−1 joint angles `θ_k` (one per segment). The state vector is `[θ, θ̇]`, total 2(N−1) components. Distance constraints are exact: every segment has length L, no stretching is possible by construction. **Tension is implicit** — the reduced coordinates satisfy the rigid-segment constraints automatically, so constraint forces never appear as variables; their physics is baked into the mass-matrix coupling — the `μ` structure (`μ_{jk} = Σ_{i ≥ max(j,k)} m_i`): moving one joint must accelerate everything downstream of it.
 
 The Lagrangian equations of motion are
 ```
-M(θ) · θ̈ + C(θ, θ̇) = Q_anchor + Q_bend + Q_damp
+M(θ) · θ̈ + C(θ, θ̇) = Q_anchor + Q_bend + Q_damp + Q_grav
 ```
 
 with
 ```
-M_{jk}(θ) = L² · cos(θ_j − θ_k) · μ_{jk}            (mass matrix, dense, SPD)
+M_{jk}(θ) = L² · cos(θ_j − θ_k) · μ_{jk}            (mass matrix, dense, symmetric positive-definite (SPD))
 C_j(θ, θ̇) = Σ_k L² · μ_{jk} · sin(θ_j − θ_k) · θ̇_k²  (Coriolis vector — see note below)
 Q_anchor_j = L · μ_{jj} · (sin θ_j · ẍ_anchor − cos θ_j · ÿ_anchor)
 μ_{jk}     = Σ_{i ≥ max(j,k)} m_i                   (lumped mass; uniform → (Ns − max(j,k))·m)
 ```
 
-**Bending** is **linear**: V_pair(Δθ) = (1/2)·k_θ·Δθ², so `V'(Δθ) = k_θ·Δθ` with `k_θ = BENDING_EI / L`. The generalized bending force on θ_j is the discrete Laplacian `k_θ·(θ_{j−1} − 2·θ_j + θ_{j+1})` with Neumann (free-end) boundary conditions.
+**Bending** is **linear**: `V(Δθ) = ½·k_θ·Δθ²`, so the restoring torque is `k_θ·Δθ` with `k_θ = BENDING_EI / L`. The generalized bending force on θ_j is the discrete Laplacian `k_θ·(θ_{j−1} − 2·θ_j + θ_{j+1})` with Neumann (free-end) boundary conditions (BCs). `BENDING_EI` is the **continuum flexural rigidity** — an N-invariant material property; the `1/L` factor makes the discrete energy match `∫EI·κ²ds`, so the physical stiffness is the same at any N. Sweet spot **~100K–1M**.
 
-We previously had a nonlinear anti-folding model with `V'(Δθ) = 2·k_θ·tan(Δθ/2)` plus a Δθ-based clamp near ±π, intended to prevent the rope from passing through itself. It turned out to be **physically wrong** — the periodic tan(Δθ/2) form gave the bending force a sign-flip past every odd multiple of π (force "aiding" rather than "restoring"), which under sustained heavy forcing caused runaway in the integrator. Real bending energy isn't periodic in Δθ — winding around adds energy. Linear bending captures this correctly and is robust under any forcing. We accept that loops can form as a consequence; if anti-folding behavior is desired later, the right form is linear + a non-periodic soft barrier (e.g. `β·exp(c·(|Δθ| − π_max))`), NOT a periodic tan-based form. See [Alex2/tests/FINDINGS.md](Alex2/tests/FINDINGS.md) for the diagnosis.
+Linear bending is robust under any forcing.
 
 **Strain-rate damping** is the linear discrete Laplacian on θ̇ (same Neumann BCs): pulls each joint's angular velocity toward its neighbors'. Zero effect on rigid rotation (all θ̇ equal → Laplacian = 0), suppresses high-frequency / alternating-sign modes exponentially. Coefficient `DAMPING_BEND`.
 
-**Mass damping** subtracts `DAMPING_MASS · θ̇` from θ̈ each frame — slowly bleeds off bulk rotation. Set to 0 to coast indefinitely.
+**Viscous drag** subtracts `VISCOUS_DRAG · θ̇` from θ̈ — a fluid-friction-like drag that slows every joint's angular velocity at the same rate. Because it acts on the absolute velocity (not on neighbor differences, like the strain-rate term), it is the **only** thing that damps bulk rigid rotation. Set to 0 to coast indefinitely.
 
 ### Naming note: Coriolis vs centrifugal
 
-We call the `C` vector "Coriolis" in the code, following the robotics/multibody-dynamics convention where the lumped `C(q,q̇)·q̇` vector is named that way. **Physically the term is centrifugal**, not Coriolis: it is quadratic in a *single* angular velocity at each k (`θ̇_k²`), and Coriolis forces are bilinear in *two distinct* velocities. The actual Coriolis-character coupling in this system lives in the cross term of the kinetic energy (`m·ȧ_anchor · L·R(θ_k)·θ̇_k`, bilinear in anchor velocity and segment angular velocity), where the anchor-velocity × segment-rotation pairing has the textbook Coriolis structure. In the 2D pure-translation case, the Euler-Lagrange algebra collapses that cross term into the `Q_anchor` acceleration coupling we have, so no explicit anchor-velocity term appears in the EOM — the Coriolis character is structural (which variables couple), not necessarily a separate surviving term. **Code keeps the conventional name; this note records the physical reading.**
+We call the `C` vector "Coriolis" in the code, following the robotics/multibody-dynamics convention where the lumped `C(q,q̇)·q̇` vector is named that way. **Physically the term is centrifugal**: it is quadratic in a *single* angular velocity at each k (`θ̇_k²`), whereas Coriolis forces are bilinear in *two distinct* velocities. The actual Coriolis-character coupling lives in the kinetic-energy cross term (anchor velocity × segment rotation), which the Euler-Lagrange algebra collapses into the `Q_anchor` acceleration coupling in the 2D pure-translation case. Code keeps the conventional name; this note records the physical reading.
 
 ## Integration
 
-**Active integrator: implicit midpoint** (γ = 0.5), selected by `INTEGRATOR = 'implicit-midpoint'`. The scheme is γ-parametrized: γ = 0.5 gives the symplectic implicit midpoint (default — A-stable, symmetric, conserves quadratic invariants → bounded energy error), γ = 1.0 gives L-stable implicit Euler (adds artificial high-frequency damping). Explicit RK4 (`INTEGRATOR = 'rk4'`) is kept as the legacy path for comparison; it was the original default but is fragile to stiff forcing (see Known limitations).
+**Integrator: implicit midpoint** (γ = 0.5), `INTEGRATOR = 'implicit-midpoint'` — symplectic, A-stable, bounded energy error. (γ = 1.0 gives L-stable implicit Euler; explicit RK4, `INTEGRATOR = 'rk4'`, is kept as a legacy comparison path.)
 
-Each substep solves the implicit update `F(y_{n+1}) = 0` for `y = [θ, θ̇]` with Newton's method (`NEWTON_MAX_ITERS = 8`, `NEWTON_TOL = 1e-6`). Each Newton iteration builds M, the Coriolis vector, and the Jacobian blocks at the evaluation state (O(N²)), then solves a dense Ns×Ns system by Gaussian elimination with partial pivoting (O(N³)). Cost is therefore (Newton iters) × (1 build + 1 solve) per substep, and it dominates the frame. At the **current default N=50 / 16 substeps** this runs **unclamped real-time** (~60 fps phone, ~75 fps desktop) at rest, eating ~60% of the frame; under hard mouse-driving Newton needs more iterations and physics spikes to ~97% of the frame. The old N=100 / 32 default ran at ~10–20 fps (slow-motion / clamped) — see Known limitations for the cut and its consequences.
+Each real frame takes `IMPLICIT_SUBSTEPS_PER_FRAME = 16` substeps of size `h/16` (total physics time = h, so anchor and chain stay in lockstep). Each substep solves `F(y_{n+1}) = 0` for `y = [θ, θ̇]` by **Newton** (`NEWTON_MAX_ITERS = 8`, convergence when `‖Δy‖/max(‖y‖,1) < NEWTON_TOL = 1e-6`). Each Newton iteration builds M + Coriolis + the Jacobian blocks (O(N²)) and solves a dense Ns×Ns system by Gaussian elimination with partial pivoting (O(N³)) — this solve dominates the frame cost.
 
-**Newton initial guess — warm start** (`NEWTON_WARM_START`, default true): each substep seeds Newton from the *previous converged substep's realized increment*, `y⁰ = yₙ + Δy_prev`, instead of one explicit-Euler step `y⁰ = yₙ + h·f(yₙ)`. Δy_prev is bounded physical motion, so it cannot overshoot Newton's convergence basin the way `h·θ̈` can once θ̈ is large — which is exactly the failure mechanism diagnosed below. Falls back to explicit Euler when no prior increment exists (first substep after Reset, an arrow-key impulse, or a non-converged step — all of which invalidate the stored increment). Bonus: the warm path skips the explicit-Euler build+solve, saving one O(N³) solve per substep.
+**Warm start** (`NEWTON_WARM_START`): each substep seeds Newton from the *previous converged substep's realized increment* (`y⁰ = yₙ + Δy_prev`) instead of an explicit-Euler **cold start** (`yₙ + h·f(yₙ)`). The realized increment is bounded physical motion, so it doesn't overshoot Newton's convergence basin the way `h·θ̈` can once θ̈ is large. Falls back to the cold start when no prior increment is valid (first substep after Reset / arrow-key impulse / a non-converged step).
 
-**Internal substepping** (`IMPLICIT_SUBSTEPS_PER_FRAME = 16`): each real frame takes that many implicit substeps of size `h / 16`. Total physics time per real frame is unchanged (= h), so anchor and chain stay in lockstep — no anchor-vs-chain time mismatch. At the old N=100, 32 was the smallest count that held under deliberate hard driving and 16 failed; at the current N=50 the matrices and θ̈ are smaller, so **16 holds for normal play** and only blows up under deliberate hard jerks that drive the frame into the clamp (Known limitations). Refining h (more substeps) is one robustness lever, but per project direction we are *not* pursuing smaller h or adaptive stepping — see Future directions. RK4 uses `RK4_SUBSTEPS_PER_FRAME` instead.
+**Anchor forcing — two delivery paths.** A *mouse-drag* velocity change is delivered **smoothly**: a constant acceleration `ax = Δv/h` spread across the frame's 16 substeps (same total impulse, no within-frame Δv jump, so the quadratic Coriolis term sees a continuous ramp). *Arrow keys* are the deliberate exception — an **abrupt** exact angular-momentum impulse `M·Δθ̇ = L·μ_jj·(sin θ_j·Δv_x − cos θ_j·Δv_y)` in the keydown handler; a jerk is the intended feel.
 
-### Smooth anchor delivery
+## Stability — the safety net
 
-Mouse-drag velocity changes are converted to a smooth anchor acceleration:
-```
-ax = Δv_x / h,   ay = Δv_y / h
-```
-which is passed to `Q_anchor` during the per-substep Newton evaluations (constant across the internal substeps within one real frame). This delivers the same total angular-momentum impulse but spreads it across the chain's integration, so the quadratic Coriolis term doesn't see a Δv-induced velocity jump at every substep. Without this smoothing, mouse impulses caused the chain to explode much more easily.
+Newton can fail to converge under hard forcing: its initial guess overshoots the convergence basin and `relStep` stays O(1) across all 8 iterations instead of shrinking. **Convergence, not magnitude, is the failure signal** — legitimate fast motion (a whip tip can reach θ̇ in the thousands) converges fine; only a genuine numerical breakdown shows `converged < substeps`. So the recovery is keyed on convergence, in two tiers:
 
-Arrow-key kicks bypass this entirely: they apply an exact angular-momentum impulse `M · Δθ̇ = L · μ_{jj} · (sin θ_j · Δv_x − cos θ_j · Δv_y)` directly inside the keydown handler. Cheap and stable.
+1. **Halving** (`USE_HALVING`, `HALVING_MAX_DEPTH = 2`). When a substep's Newton fails, `advanceSubstep` retries it as two half-steps, recursively down to `h_sub/4`. A smaller `h` shrinks the basin-overshoot, so the slice usually becomes solvable — the orthodox "reject the step and retry smaller," done **locally** so only the failing slice pays the extra cost; normal play is untouched. `implicitStep` commits θ/θ̇ only on success and leaves them at the slice-start state on failure, so the retry re-runs cleanly with no save/restore.
+2. **Coast** (`coastSubstep`, last resort) — and, unlike halving, an **unorthodox** move with no standard-method pedigree. If even the smallest retry won't converge, advance that slice by inertia with viscous drag kept (`θ̇ ← θ̇·(1−α·h)`, `θ ← θ + h·θ̇`): no forces, bounded, and provably can't inject energy. We keep it for one reason — it turned out **useful and harmless**: it carries the rare unsolvable slice through without blowing up or pumping in energy. The damping-during-coast is essential — without it, persistent coasting bypasses all damping and the chain self-sustains forever.
+
+In practice, normal and hard play converge cleanly (halving never fires); brutal direct-anchor jerks make halving rescue ~90% of failures with the occasional isolated coast. **Chaos is bounded and self-recovering but still generatable** at the extreme: drive hard enough and you get a cascade of coasts plus runaway *winding* (the wound state is visually invisible yet carries huge `bendPE`, and relaxes only glacially). The real cure is bounding the winding — see Open / in progress.
+
+Counters surfaced in the HUD / `[E]` log: `halveΣ` (slices halved), `rejΣ` (slices coasted), `singBailΣ` (linear-solve singular-pivot bails). All three at 0 in healthy play.
 
 ## Tunables (top of [alex2-physics.js](Alex2/alex2-physics.js))
 
 | Constant | Default | Role |
 |---|---|---|
-| `N` | 50 | Number of particles in the chain (joints = N − 1); cut from 100 for real-time framerate |
+| `N` | 50 | Number of particles in the chain (joints = N − 1) |
 | `ROPE_LENGTH_FRACTION` / `_H` | 0.45 / 0.3 | Chain length = `max(0.45·width, 0.3·height)` (height term keeps it long enough on narrow screens) |
 | `INITIAL_THETA` | π/2 | Initial joint angle — straight down (gravity equilibrium) |
 | `M_ROPE` | 1 | Total chain mass (excluding anchor) |
-| `GRAVITY` | 1000 | Downward accel (px/s²) on the chain + anchor; 0 disables |
-| `INTEGRATOR` | `'implicit-midpoint'` | Active integrator: `'implicit-midpoint'` (γ=0.5), `'implicit-euler'` (γ=1.0), or legacy `'rk4'` |
-| `IMPLICIT_SUBSTEPS_PER_FRAME` | 16 | Implicit substeps per real frame; 16 holds at N=50 for normal play (was 32 at N=100) |
-| `NEWTON_WARM_START` | true | Seed Newton from previous substep's increment vs. explicit Euler (see Integration) |
+| `GRAVITY` | 1000 | Downward accel (px/s²) on chain + anchor; 0 disables |
+| `INTEGRATOR` | `'implicit-midpoint'` | `'implicit-midpoint'` (γ=0.5), `'implicit-euler'` (γ=1.0), or legacy `'rk4'` |
+| `IMPLICIT_SUBSTEPS_PER_FRAME` | 16 | Implicit substeps per real frame |
+| `USE_HALVING` / `HALVING_MAX_DEPTH` | true / 2 | On Newton failure, retry the slice as halves (down to `h_sub/4`) before coasting |
+| `NEWTON_WARM_START` | true | Seed Newton from previous substep's increment vs. explicit Euler |
 | `NEWTON_MAX_ITERS` / `NEWTON_TOL` | 8 / 1e-6 | Per-substep Newton iteration cap and convergence tolerance |
 | `RK4_SUBSTEPS_PER_FRAME` | 16 | Substeps for the legacy RK4 path only |
 | `ANCHOR_KEY_VELOCITY_STEP` | 50 px/s | Arrow-key impulse magnitude |
-| `BENDING_EI` | 1 | Continuum flexural rigidity; `k_θ = BENDING_EI / L` |
-| `DAMPING_BEND` | 1000 | Strain-rate (discrete Laplacian on θ̇) damping coefficient |
-| `DAMPING_MASS` | 0.5 | Mass-proportional damping coefficient (only thing that damps bulk rotation) |
+| `BENDING_EI` | 500000 | Continuum flexural rigidity; `k_θ = BENDING_EI / L`. Sweet spot ~100K–1M |
+| `DAMPING_BEND` | 1000 | Strain-rate (discrete Laplacian on θ̇) damping |
+| `VISCOUS_DRAG` | 0.5 | Viscous drag (only thing that damps bulk rotation) |
 | `USE_ANCHOR_SPRING` | true | Mouse→anchor spring + handle (the shipping control) |
-| `SPRING_K` | 800 | Spring stiffness (higher = more precise/rigid control, less low-pass filtering) |
-| `SPRING_DAMP` | 25 | Damping on the anchor's velocity (≈ near-critical scales as √(K·mass)) |
+| `SPRING_K` | 800 | Spring stiffness (higher = more precise control, less low-pass filtering) |
+| `SPRING_DAMP` | 25 | Damping on the anchor's velocity (near-critical scales as √(K·mass)) |
 | `ANCHOR_MASS` | 2 | Anchor inertia; bigger = smoother/laggier, smaller `ax` |
 | `SPRING_REST_FRAC` | 0.16 | Spring rest length as a fraction of min(w,h) — the idle handle offset |
-| `HANDLE_GRAB_RADIUS_FRAC` | 1/6 | Handle finger hit-target (big, for narrow screens) |
-| `HANDLE_MARKER_RADIUS_FRAC` | 1/15 | Drawn handle radius |
+| `HANDLE_GRAB_RADIUS_FRAC` / `_MARKER_` | 1/6 / 1/15 | Handle finger hit-target / drawn radius |
 | `USE_CHAIN_WRAP` | true | Horizontal-only toroidal wrap of the whole scene |
 
-### Diagnostic flags (flip individually to investigate)
+### Diagnostics (flag-gated; default off unless noted)
 
-| Flag | What it logs |
+| Flag / helper | What it does |
 |---|---|
-| `NEWTON_LOG_ENABLED` | Per-frame per-substep Newton (iters, relStep, converged). **Gated to print only problem frames** — any substep that fails to converge (`converged < substeps`) or strains near the iter cap (≥ `NEWTON_MAX_ITERS − 2`); healthy frames stay silent. The headline `converged=X/Y` distinguishes a numerical failure (Newton diverged) from a physical one |
-| `ENERGY_MONITOR` | E = ½ θ̇ᵀ M θ̇ per frame; spike/NaN warnings when E_new / E_prev > `E_SPIKE_RATIO`. An energy spike *with* Newton converged = legitimate forcing; *with* Newton failed = numerical breakdown |
-| `THETA_LOG_ENABLED` | Buffers θ at three fixed joints per frame (silent); `window.alex2.dumpThetaLog()` downloads a CSV. `window.alex2.dumpFullState(label)` dumps all θ/θ̇ to CSV + JSON |
-| `TRACE_ENABLED` | Per-frame θ_j values (head + tail) for `TRACE_DURATION_FRAMES`; stops on NaN |
-| `CONDITION_ESTIMATE` | Spectral κ₂(M) via power iteration (λ_max) + inverse power iteration (λ_min). Confirmed M conditioning is **not** the cause of explosions — κ stayed ~1.5e4 throughout failures |
-| `SUBSTEP_LOG_ENABLED` | Per-substep RHS and θ̈ for the first `SUBSTEP_LOG_HEAD` joints. **RK4 only** — `captureSubstep` is wired into `rk4Step`, not the implicit path, so it records nothing under implicit midpoint |
-| `INPUT_LOG_ENABLED` | Per-frame anchor position / velocity / acceleration in px-per-frame units (same scale as L ≈ 4 px), gated alongside the trace so frame indices align with the substep log |
-| `SHOW_PERF_HUD` | **On-canvas** overlay (top-left), not console — for comparing devices and reading the frame budget. Shows FPS + real frame interval (wall-clock, ignores the dt clamp), integrator-only physics ms and its % of frame, and raw dt with a **⚠ CLAMPED** flag when main.js's 33 ms ceiling fires. Default on. Note FPS/frame-ms include the other diagnostic monitors, so turn `ENERGY_MONITOR` / `NEWTON_LOG_ENABLED` off for an honest framerate reading |
+| `SHOW_PERF_HUD` (on) | On-canvas overlay: FPS + real frame interval, integrator-only physics ms and % of frame, raw dt with a `⚠ CLAMPED` flag when main.js's 33 ms ceiling fires, and the `reject Σ` counter. |
+| `NEWTON_LOG_ENABLED` | Per-frame Newton summary, **gated to problem frames only** (a substep fails to converge, or strains near the iter cap). Headline `converged=X/Y  halveΣ  rejΣ  singBailΣ`. Silent in healthy play. |
+| `ENERGY_DECAY_LOG` | The `[E]` log: every N frames prints `peakKE`, `bendPE`, `max|Δθ|` (winding), `peak|aV|`, `halveΣ`, `rejΣ`. The winding/energy gauge. |
+| `ENERGY_MONITOR` | `E = ½θ̇ᵀMθ̇` per frame; warns on spikes (`E_new/E_prev > E_SPIKE_RATIO`) or NaN. |
+| `CONDITION_ESTIMATE` | Spectral κ₂(M) by power + inverse-power iteration (expensive). M conditioning is *not* the cause of blow-ups. |
+| `window.alex2.dumpTheta()` | On-demand console print of per-joint `Δθ` (+ turn count) and raw `θ` — for comparing winding data to the visual. |
+| `window.alex2.kickChain()` / `kickAnchor()` | Perturb the chain-only / anchor-only at rest, to study decay in isolation. |
 
-Most outputs go to the console; the θ / substep / input logs download as CSV (substep/input dump when tracing stops; θ on demand). The perf HUD draws on-canvas instead.
+## Open / in progress
 
-## Known limitations
-
-- **Blow-up mechanism (diagnosed 2026-06, implicit midpoint)** — under hard forcing the chain can still NaN. The cause is **numerical, not physical**: at the blow-up frame Newton stops converging (`converged < substeps`, relStep ~ O(1)) *before* energy explodes, and the energy jumps ~10³⁰× in one frame — impossible for the bounded-energy physical system. Root cause is **Newton's initial guess overshooting its convergence basin**: large M⁻¹ → large θ̈ → the explicit-Euler guess `yₙ + h·θ̈` lands outside the basin → Newton diverges → spurious energy → self-reinforcing collapse (no recovery once it starts). Confirmed across two substep counts; conditioning of M is *not* involved (κ stayed ~1.5e4). **Warm start (above) is the fix** — it raises the failure threshold dramatically by seeding from bounded realized motion. It is a strict improvement but not a total cure: at 16 substeps deliberate hammering can still cross the (now much higher) threshold; **32 substeps + warm start held under deliberate abuse**. *Caveat:* part of 32's apparent robustness is a frame-rate confound — at ~10–20 fps the anchor lags the mouse, throttling how hard the chain can actually be driven; 16 runs faster, so it can be driven harder, which is one reason it fails where 32 doesn't.
-- **Performance & the N=50 / 16-substep cut (2026-06-10)** — the per-substep Newton solve (O(N³) × iters × substeps) dominates the frame. At the old N=100 / 32 it ran ~10–20 fps, *below* 30 fps even at rest, so main.js's 33 ms dt-clamp fired permanently → physics ran in slow motion, and the slow-motion rate differed by device (phone advanced more physics-time/sec than the slower desktop) — that, not a physics difference, was why the chain "felt different" across devices. Cutting to **N=50 (≈5× via O(N³)) + 16 substeps (≈2×)** put both devices unclamped at real-time (~60 fps phone / ~75 fps desktop, ~60% physics at rest, ~97% under hard drive). The cross-device feel converged the moment the clamp cleared. Reducing damping for a livelier feel will lower the blow-up threshold (faster motion → larger θ̈) — liveliness and stability trade off.
-- **Blow-up at N=50 / 16 is gated by the dt-clamp (2026-06-10)** — under *deliberate* hard jerks (rare in normal play) the chain still NaNs, and the blow-up coincides exactly with the clamp re-appearing. Causal chain: hard jerk → Newton iters spike → frame slows past 33 ms → clamp fires → smooth-delivery `ax = Δanchor / h` is computed with `h` pinned at 33 ms while the real frame was longer → the delivered anchor acceleration is **inflated** → larger θ̈ → Newton overshoots its basin → blow-up. So a slow frame manufactures an artificial forcing spike; the clamp *feeds* the explosion rather than protecting against it. Both planned fixes attack this — the mouse→anchor spring bounds `ax` at the source, and a fixed-timestep accumulator would remove the clamp-inflation entirely.
-- **Long-persistent "chaos"** at default damping — brief mouse inputs can trigger a regime where the chain keeps moving for *much longer* than the mass-damping time-constant (~10 sec at `α = 0.1`) would predict. This is a *separate* phenomenon from the blow-up above and is most likely **genuine bounded Hamiltonian chaos** (an N−1 link chain is a generalized multi-pendulum with positive Lyapunov exponents), not a numerical artifact — sensitive, energy-conserving wandering that only decays on the slow damping timescale. Higher damping suppresses it at the cost of sluggish feel; not further pursued.
-- **Spring made the blow-up recoverable, not impossible (2026-06-10)** — with the mouse→anchor spring in place, a hard jerk still spikes Newton (fps dips to ~5, then climbs back) but no longer NaNs permanently: the spring removed the clamp-inflation feedback, so the solver re-converges and it self-heals. *Residual:* an **involuntary** hand jerk is sharper than a deliberate one and can still trigger a chaos episode; sometimes it plateaus at a sustained ~22 fps (Newton chronically near its iter cap, energy injection ≈ damping removal) rather than fully recovering. An anti-chaos mechanism is the next planned fix (deliberately deferred so it doesn't mask the raw behavior).
-- **No friction / no collisions; gravity is now on** — gravity was added (chain + anchor; see "What Alex2 is"). Friction and self/wall collisions are still out by design — physically-correct chain-floor collision in reduced coordinates is a large separate project; for now the chain may pass off-screen (the wrap is horizontal-only, so it doesn't reappear at the top).
-
-## Anti-chaos safety net + current understanding (2026-06-12)
-
-This section is deliberately split into **measured** facts (from logged tests) and **hypotheses** (interpretations not yet proven). Do not promote a hypothesis to a fact without a test.
-
-**The safety net (in code, `REJECT_NONCONVERGED`, default true):** a substep where Newton fails to converge (`conv=false`) is rejected — instead of committing its (untrustworthy) result, the chain **coasts**, and (fix "a", 2026-06-12) **still applies mass damping** during the coast: `θ̇ ← θ̇·(1−α·h)`, `θ ← θ + h·θ̇`. The damping-during-coast is essential: without it, persistent rejection bypasses all damping. The earlier per-substep `Δθ̇` magnitude clamp (`MAX_DTHETADOT_PER_SUBSTEP`) is **disabled** — it clipped legitimate fast whip; convergence, not magnitude, is the right discriminator.
-
-**Diagnostic tooling added (all flag-gated, for the ongoing investigation):** `[E]` energy-decay log (`ENERGY_DECAY_LOG` — peakKE, bendPE, max|Δθ|, peak|aV|, rejΣ); `PEAK_LOG` (per-record context: joint, θ̇, ax/ay, warm/COLD, conv); `window.alex2.kickChain()` / `kickAnchor()` (isolated perturbations); HUD lines for reject count + peak Δθ̇.
-
-**Measured:**
-- Isolated chain kick decays e-fold ≈ 2 s to a ~6e-27 numerical floor; anchor kick too (slightly slower). Damping (mass + spring) works correctly on the converged path.
-- The reject step prevents the NaN explosion. `conv=false` is the clean blow-up signature — legitimate fast motion stays `conv=true` up to θ̇ ~ 2000.
-- Under sustained chaos the chain **winds up** (`max|Δθ|` → 10⁵–10⁶ rad, `bendPE` grows in step).
-- **Before** fix (a): sustained chaos was **self-sustaining with the anchor at rest** (`|aV| ~ 1e-15`, zero input) — rejΣ climbing ~480/s, peakKE pinned ~2e9, `max|Δθ|` winding linearly.
-- **After** fix (a): that self-sustain dies quickly (rejΣ freezes, peakKE drops 100×+ in ~1 s), but the chain is left **wound** — and the wound joint is **pinned, not relaxing**: over a ~46-min hang `max|Δθ|`/`bendPE` stayed frozen (`1520.4`/`2.91e5`, ~0.05 change). The winding is *visually invisible* (position is θ mod 2π, so the chain looks straight while carrying the `bendPE`). A tiny non-decaying oscillation persists (`peakKE ~ 2.4e-20`, well above the 6e-27 kick-floor) — a candidate, unconfirmed match for the 12-h overnight wiggle.
-- Chaos is **still generatable** after all fixes — bounded and self-recovering now, but not prevented.
-
-**Hypotheses (hold loosely):**
-- The reject-coast bypassing damping *was* the mechanism of the pre-fix self-sustain. (Strongly suggested — fix (a) changed exactly that and stopped it — but "stopped when we changed X" is not proof X was the sole cause.)
-- The linear-bending unbounded winding is what keeps Newton failing under sustained chaos (winding ↔ reject reinforcement). Correlation observed; causation inferred.
-- **UNEXPLAINED / do not assume:** the 12-hour overnight observation (random few-second oscillations on a *settled, hanging* chain) is **not** established to be the same phenomenon as the post-chaos wound state. A slow monotonic unwind does not obviously produce few-second random oscillations; these may be unrelated. Treat the overnight wiggle as an open mystery, possibly never resolved.
-
-**Open problem (the real one):** chaos is still generatable. Candidate next step is fix "b" — bound the winding with a non-periodic soft barrier near ±π (linear bending + `β·exp(c·(|Δθ|−π_max))`) so the bending force stays solvable — but this is an untested proposal, and a model change to weigh deliberately.
-
-## Future directions
-
-The next phase targets **feel and input-limiting**, not integrator robustness. Per project direction we are explicitly **not** pursuing smaller h, adaptive step-rejection, or line-search Newton.
-
-- **Mouse→anchor spring — DONE (2026-06-10).** Implemented as the shipping control (see "What Alex2 is"). It bounds `ax` at the source and turned the irrecoverable NaN into a recoverable transient. Open follow-up: a stiffer `SPRING_K` (set for control feel) passes jerks through more directly — less low-pass filtering — so it trades against blow-up margin.
-- **Anti-chaos mechanism (next)** — the user has an idea, deferred so it doesn't mask the current raw behavior. Targets the residual involuntary-jerk chaos / 22 fps plateau (Known limitations).
-- **Tune the fraction "scale" (parked)** — the size-fractions (handle radii, spring rest, etc.) are computed off `min(w,h)` and were set provisionally; the reference scale and the numbers are to be revisited together.
-- **Wrap the spring/handle visual edge cases (parked)** — currently fine for the horizontal wrap; revisit if a tethered element reads badly crossing a seam.
-- **Breakable rope** — let a joint *tear* when its θ̈ exceeds a limit; embraces the failure as a mechanic.
-- **Performance** — the dense O(N³) solve per Newton iter dominates. Note the reduced-coordinate **mass matrix M is dense, not banded** (the lumped-mass `μ` couples every joint pair), so a banded solver does *not* apply directly; the real O(N) lever for a chain is the articulated-body / Featherstone recursion, which never forms M — a larger reformulation.
-
-Earlier integrator notes, now resolved or shelved: implicit midpoint (the old "B3") is **implemented and is the default**; symplectic Verlet/Yoshida ("B4") is still explicit with the same θ̈·h² sensitivity and is not pursued.
+- **Reset on "cannot proceed."** Instead of coasting at the floor, auto-reset the chain (with a blow sound) when even halving can't solve — on a *sustained*-failure trigger (K consecutive coast-frames), so isolated harmless coasts don't reset. Discussed, not built.
+- **Whip crack via mass taper.** A real whip cracks because it's lighter toward the tip: the impedance `√(T·μ)` drops, so the traveling wave's velocity amplifies. Uniform `particleMass` gives a traveling wave but no crack. Add a tip-ward mass taper (stiffness taper secondary).
+- **Open mystery — pinned wound state.** A heavily-wound chain leaves a frozen wound state (`max|Δθ|` and `bendPE` essentially constant) with a tiny non-decaying wiggle that relaxes only over ~hours. Possibly the same as a 12-hour overnight observation; unconfirmed, and may never be resolved — because we have since dramatically increased the `BENDING_EI` constant, so the chain no longer reaches the heavily-wound regime that produced it.
+- **Performance.** The dense O(N³) Newton solve dominates. M is **dense, not banded** (the lumped-mass `μ` couples every joint pair), so a banded solver doesn't apply; the real O(N) lever is the articulated-body / Featherstone recursion (never forms M) — a larger reformulation.
+- **Parked feel items.** The anchor/handle marker & grab radii (fractions of `min(w,h)`) are provisional and to be revisited with the reference scale; the spring/handle wrap reads slightly oddly when the anchor crosses a seam.
 
 ## Sizing
 
-Chain length is `max(width·ROPE_LENGTH_FRACTION, height·ROPE_LENGTH_FRACTION_H)`; segment length `L = chainLength / (N − 1)`. Anchor marker/grab radii (`ANCHOR_MARKER_RADIUS_FRAC`, `ANCHOR_GRAB_RADIUS_FRAC`) and handle marker/grab radii (`HANDLE_MARKER_RADIUS_FRAC`, `HANDLE_GRAB_RADIUS_FRAC`) are fractions of `min(w,h)`. (These fractions are provisional — see Future directions.)
+Chain length is `max(width·ROPE_LENGTH_FRACTION, height·ROPE_LENGTH_FRACTION_H)`; segment length `L = chainLength / (N − 1)`. Anchor marker/grab radii (`ANCHOR_MARKER_RADIUS_FRAC`, `ANCHOR_GRAB_RADIUS_FRAC`) and handle marker/grab radii (`HANDLE_MARKER_RADIUS_FRAC`, `HANDLE_GRAB_RADIUS_FRAC`) are fractions of `min(w,h)`. (These fractions are provisional — see Open / in progress.)
 
 ## Reset behavior
 
-The Reset button (handler in [controls.js](controls.js)) resets the anchor to its initial position, parks the handle above the anchor, releases any held grab, and zeros all `θ` and `θ̇` (chain back to straight-down). Tracing/logging buffers also restart so a Reset gives clean repeatable runs.
+The Reset button (handler in [controls.js](controls.js)) resets the anchor to its initial position, parks the handle above the anchor, releases any held grab, and zeros all `θ` and `θ̇` (chain back to straight-down). It also clears the anti-chaos counters (`halveΣ`/`rejΣ`) and the `[E]`-log clock.

@@ -24,7 +24,7 @@
 
 let BENDING_EI         = 100;       // overridden per test
 let DAMPING_BEND       = 0;         // conservative: 0
-let DAMPING_MASS       = 0;         // conservative: 0
+let VISCOUS_DRAG       = 0;         // conservative: 0
 let SIMPLIFIED_PHYSICS = false;
 
 const NEWTON_MAX_ITERS = 12;
@@ -209,7 +209,7 @@ function buildJacobianBlocks(rope, theta, thetaDot, ddt, ax, ay){
   B.fill(0);
 
   if(!SIMPLIFIED_PHYSICS){
-    for(let i = 0; i < Ns; i++) w[i] = DAMPING_MASS * thetaDot[i] + ddt[i];
+    for(let i = 0; i < Ns; i++) w[i] = VISCOUS_DRAG * thetaDot[i] + ddt[i];
     for(let i = 0; i < Ns; i++){
       let s = 0;
       for(let j = 0; j < Ns; j++){
@@ -283,7 +283,7 @@ function buildJacobianBlocks(rope, theta, thetaDot, ddt, ax, ay){
         const muJM = (Ns - Math.max(j, mm)) * m;
         B[j * Ns + mm] -= 2 * L2 * muJM * Math.sin(theta[j] - theta[mm]) * thetaDot[mm];
       }
-      B[j * Ns + mm] -= DAMPING_MASS * M[j * Ns + mm];
+      B[j * Ns + mm] -= VISCOUS_DRAG * M[j * Ns + mm];
     }
   }
 
@@ -333,11 +333,11 @@ function implicitStep(rope, h, ax, ay, gamma){
   buildMassMatrix(rope, thetaN);
   Msnap.set(rope.M);
   buildRhs(rope, thetaN, thetaDotN, ax, ay);
-  if(DAMPING_MASS !== 0){
+  if(VISCOUS_DRAG !== 0){
     for(let i = 0; i < Ns; i++){
       let s = 0;
       for(let j = 0; j < Ns; j++) s += Msnap[i * Ns + j] * thetaDotN[j];
-      rope.rhs[i] -= DAMPING_MASS * s;
+      rope.rhs[i] -= VISCOUS_DRAG * s;
     }
   }
   gaussSolve(Ns, rope.M, rope.rhs, rope.accel);
@@ -363,11 +363,11 @@ function implicitStep(rope, h, ax, ay, gamma){
     buildMassMatrix(rope, thetaEval);
     Msnap.set(rope.M);
     buildRhs(rope, thetaEval, thetaDotEval, ax, ay);
-    if(DAMPING_MASS !== 0){
+    if(VISCOUS_DRAG !== 0){
       for(let i = 0; i < Ns; i++){
         let s = 0;
         for(let j = 0; j < Ns; j++) s += Msnap[i * Ns + j] * thetaDotEval[j];
-        rope.rhs[i] -= DAMPING_MASS * s;
+        rope.rhs[i] -= VISCOUS_DRAG * s;
       }
     }
     gaussSolve(Ns, rope.M, rope.rhs, rope.accel);
@@ -538,7 +538,7 @@ console.log('================================================================');
 console.log('\n############ Pass 1: SIMPLIFIED_PHYSICS = true ############');
 SIMPLIFIED_PHYSICS = true;
 DAMPING_BEND = 0;
-DAMPING_MASS = 0;
+VISCOUS_DRAG = 0;
 
 BENDING_EI = 0;
 runEnergyTest(
@@ -573,7 +573,7 @@ runEnergyTest(
 console.log('\n############ Pass 2: SIMPLIFIED_PHYSICS = false (full M(θ) + Coriolis + nonlinear bending) ############');
 SIMPLIFIED_PHYSICS = false;
 DAMPING_BEND = 0;
-DAMPING_MASS = 0;
+VISCOUS_DRAG = 0;
 
 BENDING_EI = 0;
 runEnergyTest(

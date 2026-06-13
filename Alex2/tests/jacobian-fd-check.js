@@ -26,7 +26,7 @@
 
 const BENDING_EI    = 100;
 const DAMPING_BEND  = 1;
-const DAMPING_MASS  = 0.1;
+const VISCOUS_DRAG  = 0.1;
 
 // Toggled by run loop below.
 let SIMPLIFIED_PHYSICS = false;
@@ -196,7 +196,7 @@ function buildJacobianBlocks(rope, theta, thetaDot, ddt, ax, ay){
   B.fill(0);
 
   if(!SIMPLIFIED_PHYSICS){
-    for(let i = 0; i < Ns; i++) w[i] = DAMPING_MASS * thetaDot[i] + ddt[i];
+    for(let i = 0; i < Ns; i++) w[i] = VISCOUS_DRAG * thetaDot[i] + ddt[i];
     for(let i = 0; i < Ns; i++){
       let s = 0;
       for(let j = 0; j < Ns; j++){
@@ -272,7 +272,7 @@ function buildJacobianBlocks(rope, theta, thetaDot, ddt, ax, ay){
         const muJM = (Ns - Math.max(j, mm)) * m;
         B[j * Ns + mm] -= 2 * L2 * muJM * Math.sin(theta[j] - theta[mm]) * thetaDot[mm];
       }
-      B[j * Ns + mm] -= DAMPING_MASS * M[j * Ns + mm];
+      B[j * Ns + mm] -= VISCOUS_DRAG * M[j * Ns + mm];
     }
   }
 
@@ -303,11 +303,11 @@ function computeDdt(rope, theta, thetaDot, ax, ay){
   // Snapshot M before gaussSolve destroys it.
   const Mcopy = new Float64Array(rope.M);
   buildRhs(rope, theta, thetaDot, ax, ay);
-  if(DAMPING_MASS !== 0){
+  if(VISCOUS_DRAG !== 0){
     for(let i = 0; i < Ns; i++){
       let s = 0;
       for(let j = 0; j < Ns; j++) s += Mcopy[i * Ns + j] * thetaDot[j];
-      rope.rhs[i] -= DAMPING_MASS * s;
+      rope.rhs[i] -= VISCOUS_DRAG * s;
     }
   }
   // gaussSolve destroys M and rhs; result lands in accel.

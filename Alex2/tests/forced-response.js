@@ -21,7 +21,7 @@
 
 let BENDING_EI         = 100;
 let DAMPING_BEND       = 1;
-let DAMPING_MASS       = 0.1;
+let VISCOUS_DRAG       = 0.1;
 let SIMPLIFIED_PHYSICS = false;
 // PROPOSED FIX (attempt 1, failed): when true, set V'' = 0 in the bending
 // Jacobian when Δθ is in the clamp region.  Matches the actual derivative
@@ -250,7 +250,7 @@ function buildJacobianBlocks(rope, theta, thetaDot, ddt, ax, ay){
   B.fill(0);
 
   if(!SIMPLIFIED_PHYSICS){
-    for(let i = 0; i < Ns; i++) w[i] = DAMPING_MASS * thetaDot[i] + ddt[i];
+    for(let i = 0; i < Ns; i++) w[i] = VISCOUS_DRAG * thetaDot[i] + ddt[i];
     for(let i = 0; i < Ns; i++){
       let s = 0;
       for(let j = 0; j < Ns; j++){
@@ -356,7 +356,7 @@ function buildJacobianBlocks(rope, theta, thetaDot, ddt, ax, ay){
         const muJM = (Ns - Math.max(j, mm)) * m;
         B[j * Ns + mm] -= 2 * L2 * muJM * Math.sin(theta[j] - theta[mm]) * thetaDot[mm];
       }
-      B[j * Ns + mm] -= DAMPING_MASS * M[j * Ns + mm];
+      B[j * Ns + mm] -= VISCOUS_DRAG * M[j * Ns + mm];
     }
   }
 
@@ -401,11 +401,11 @@ function implicitStep(rope, h, ax, ay, gamma){
   buildMassMatrix(rope, thetaN);
   Msnap.set(rope.M);
   buildRhs(rope, thetaN, thetaDotN, ax, ay);
-  if(DAMPING_MASS !== 0){
+  if(VISCOUS_DRAG !== 0){
     for(let i = 0; i < Ns; i++){
       let s = 0;
       for(let j = 0; j < Ns; j++) s += Msnap[i * Ns + j] * thetaDotN[j];
-      rope.rhs[i] -= DAMPING_MASS * s;
+      rope.rhs[i] -= VISCOUS_DRAG * s;
     }
   }
   gaussSolve(Ns, rope.M, rope.rhs, rope.accel);
@@ -431,11 +431,11 @@ function implicitStep(rope, h, ax, ay, gamma){
     buildMassMatrix(rope, thetaEval);
     Msnap.set(rope.M);
     buildRhs(rope, thetaEval, thetaDotEval, ax, ay);
-    if(DAMPING_MASS !== 0){
+    if(VISCOUS_DRAG !== 0){
       for(let i = 0; i < Ns; i++){
         let s = 0;
         for(let j = 0; j < Ns; j++) s += Msnap[i * Ns + j] * thetaDotEval[j];
-        rope.rhs[i] -= DAMPING_MASS * s;
+        rope.rhs[i] -= VISCOUS_DRAG * s;
       }
     }
     gaussSolve(Ns, rope.M, rope.rhs, rope.accel);
@@ -537,7 +537,7 @@ function runScenarioFn(label, Ns, L, m, gamma, h_sub, forcingFn, totalFrames){
   console.log(`\n=== ${label} ===`);
   console.log(`  Ns=${Ns}, L=${L.toFixed(3)}, m=${m.toFixed(4)}, h_sub=${h_sub.toFixed(5)}, integrator=${gamma === 1 ? 'euler' : 'midpoint'}`);
   console.log(`  Total substeps: ${totalFrames}, total time: ${(totalFrames * h_sub).toFixed(3)}s`);
-  console.log(`  Damping: BEND=${DAMPING_BEND}, MASS=${DAMPING_MASS}, BENDING_EI=${BENDING_EI}, SIMPLIFIED=${SIMPLIFIED_PHYSICS}`);
+  console.log(`  Damping: BEND=${DAMPING_BEND}, MASS=${VISCOUS_DRAG}, BENDING_EI=${BENDING_EI}, SIMPLIFIED=${SIMPLIFIED_PHYSICS}`);
   console.log(`  E0: Ek=${E0.Ek.toExponential(3)}  V=${E0.V.toExponential(3)}  total=${E0.total.toExponential(3)}`);
   console.log(`\n  ${'substep'.padStart(8)} ${'time(s)'.padStart(8)} ${'maxθ'.padStart(10)} ${'maxθ̇'.padStart(12)} ${'maxΔθ'.padStart(10)} ${'Ek'.padStart(11)} ${'V'.padStart(11)} ${'E_total'.padStart(11)} ${'iters'.padStart(6)} ${'relStep'.padStart(10)}`);
 
@@ -602,7 +602,7 @@ console.log('================================================================');
 // then quiescent.  See whether chaos emerges and how it evolves.
 SIMPLIFIED_PHYSICS = false;
 DAMPING_BEND = 1;
-DAMPING_MASS = 0.1;
+VISCOUS_DRAG = 0.1;
 BENDING_EI = 100;
 runScenario('Full physics, defaults, brief perpendicular mouse impulse',
   Ns_prod, L_prod, m_prod, 1.0, h_sub, 0, 6000, 16, 600);
@@ -619,7 +619,7 @@ runScenario('Full physics, BIG damping, mouse impulse',
 // Scenario 4: simplified physics, defaults — see if chaos goes away.
 SIMPLIFIED_PHYSICS = true;
 DAMPING_BEND = 1;
-DAMPING_MASS = 0.1;
+VISCOUS_DRAG = 0.1;
 BENDING_EI = 100;
 runScenario('Simplified physics, defaults, mouse impulse',
   Ns_prod, L_prod, m_prod, 1.0, h_sub, 0, 6000, 16, 600);
@@ -629,7 +629,7 @@ runScenario('Simplified physics, defaults, mouse impulse',
 // energy minus dissipation.
 SIMPLIFIED_PHYSICS = false;
 DAMPING_BEND = 1;
-DAMPING_MASS = 0.1;
+VISCOUS_DRAG = 0.1;
 BENDING_EI = 100;
 runScenario('Full physics, MIDPOINT (γ=0.5), mouse impulse',
   Ns_prod, L_prod, m_prod, 0.5, h_sub, 0, 6000, 16, 600);
@@ -690,7 +690,7 @@ runScenarioFn('Simplified (LINEAR bending), BIG damping, OSCILLATING ay (±6000,
 // unphysical in the clamp region).
 SIMPLIFIED_PHYSICS = false;
 DAMPING_BEND = 1;
-DAMPING_MASS = 0.1;
+VISCOUS_DRAG = 0.1;
 BENDING_EI = 100;
 FIX_BENDING_CLAMP_JACOBIAN = true;
 runScenarioFn('FIX 1 (V\'\'=0 at clamp), OSCILLATING ay (±6000, 1Hz) — still explodes',
