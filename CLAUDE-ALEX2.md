@@ -41,10 +41,10 @@ with
 M_{jk}(θ) = L² · cos(θ_j − θ_k) · μ_{jk}            (mass matrix, dense, symmetric positive-definite (SPD))
 C_j(θ, θ̇) = Σ_k L² · μ_{jk} · sin(θ_j − θ_k) · θ̇_k²  (Coriolis vector — see note below)
 Q_anchor_j = L · μ_{jj} · (sin θ_j · ẍ_anchor − cos θ_j · ÿ_anchor)
-μ_{jk}     = Σ_{i ≥ max(j,k)} m_i                   (lumped mass; uniform → (Ns − max(j,k))·m)
+μ_{jk}     = Σ_{i ≥ max(j,k)} m_i                   (lumped mass = reverse cumsum of m_i; uniform → (Ns − max(j,k))·m)
 ```
 
-**Bending** is **linear**: `V(Δθ) = ½·k_θ·Δθ²`, so the restoring torque is `k_θ·Δθ` with `k_θ = BENDING_EI / L`. The generalized bending force on θ_j is the discrete Laplacian `k_θ·(θ_{j−1} − 2·θ_j + θ_{j+1})` with Neumann (free-end) boundary conditions (BCs). `BENDING_EI` is the **continuum flexural rigidity** — an N-invariant material property; the `1/L` factor makes the discrete energy match `∫EI·κ²ds`, so the physical stiffness is the same at any N. Sweet spot **~100K–1M**.
+**Bending** is **linear**: `V(Δθ) = ½·k_θ·Δθ²`, so the restoring torque is `k_θ·Δθ` with `k_θ = BENDING_EI / L`. The generalized bending force on θ_j is the discrete Laplacian `k_θ·(θ_{j−1} − 2·θ_j + θ_{j+1})` with Neumann (free-end) boundary conditions (BCs). `BENDING_EI` is the **continuum flexural rigidity** — an N-invariant material property; the `1/L` factor makes the discrete energy match `∫EI·κ²ds`, so the physical stiffness is the same at any N. Only the ratio `EI/M_ROPE` is dynamically meaningful (the bending-vs-inertia balance), so `BENDING_EI` is written as `5000·M_ROPE` to fix that ratio at 5000 regardless of the mass — see the tunables table.
 
 Linear bending is robust under any forcing.
 
@@ -82,10 +82,11 @@ Counters surfaced in the HUD / `[E]` log: `halveΣ` (slices halved), `rejΣ` (sl
 | Constant | Default | Role |
 |---|---|---|
 | `N` | 50 | Number of particles in the chain (joints = N − 1) |
-| `ROPE_LENGTH_FRACTION` / `_H` | 0.45 / 0.3 | Chain length = `max(0.45·width, 0.3·height)` (height term keeps it long enough on narrow screens) |
+| `ROPE_LENGTH_FRACTION` / `_H` | 0.45 / 0.8 | Chain length = `max(0.45·width, 0.8·height)` (height term keeps it long enough on narrow screens) |
 | `INITIAL_THETA` | π/2 | Initial joint angle — straight down (gravity equilibrium) |
-| `M_ROPE` | 1 | Total chain mass (excluding anchor) |
-| `GRAVITY` | 1000 | Downward accel (px/s²) on chain + anchor; 0 disables |
+| `M_ROPE` | 1 | Total chain mass (excluding anchor); conserved under the taper |
+| `MASS_TAPER` | 25 | Tip-ward mass taper: head:tip mass ratio, linear (1 = uniform). Lighter tip → impedance `√(T·μ)` drops → wave speeds up → whip crack. Total mass renormalized to `M_ROPE`. Set ≈ N for the linear (N−i) profile |
+| `GRAVITY` | 100 | Downward accel (px/s²) on chain + anchor; 0 disables |
 | `INTEGRATOR` | `'implicit-midpoint'` | `'implicit-midpoint'` (γ=0.5), `'implicit-euler'` (γ=1.0), or legacy `'rk4'` |
 | `IMPLICIT_SUBSTEPS_PER_FRAME` | 16 | Implicit substeps per real frame |
 | `USE_HALVING` / `HALVING_MAX_DEPTH` | true / 2 | On Newton failure, retry the slice as halves (down to `h_sub/4`) before coasting |
@@ -93,14 +94,14 @@ Counters surfaced in the HUD / `[E]` log: `halveΣ` (slices halved), `rejΣ` (sl
 | `NEWTON_MAX_ITERS` / `NEWTON_TOL` | 8 / 1e-6 | Per-substep Newton iteration cap and convergence tolerance |
 | `RK4_SUBSTEPS_PER_FRAME` | 16 | Substeps for the legacy RK4 path only |
 | `ANCHOR_KEY_VELOCITY_STEP` | 50 px/s | Arrow-key impulse magnitude |
-| `BENDING_EI` | 500000 | Continuum flexural rigidity; `k_θ = BENDING_EI / L`. Sweet spot ~100K–1M |
-| `DAMPING_BEND` | 1000 | Strain-rate (discrete Laplacian on θ̇) damping |
+| `BENDING_EI` | `5000·M_ROPE` | Continuum flexural rigidity; `k_θ = BENDING_EI / L`. Only `EI/M_ROPE` matters (bending-vs-inertia); written as `5000·M_ROPE` to fix that ratio at 5000 |
+| `DAMPING_BEND` | `100·M_ROPE` | Strain-rate (discrete Laplacian on θ̇) damping — stiffness-proportional, so tied to `M_ROPE` like `BENDING_EI` to keep its effect `DAMPING_BEND/M_ROPE` mass-invariant. (`VISCOUS_DRAG` is mass-proportional → invariant without a tie.) |
 | `VISCOUS_DRAG` | 0.5 | Viscous drag (only thing that damps bulk rotation) |
 | `USE_ANCHOR_SPRING` | true | Mouse→anchor spring + handle (the shipping control) |
 | `SPRING_K` | 800 | Spring stiffness (higher = more precise control, less low-pass filtering) |
 | `SPRING_DAMP` | 25 | Damping on the anchor's velocity (near-critical scales as √(K·mass)) |
 | `ANCHOR_MASS` | 2 | Anchor inertia; bigger = smoother/laggier, smaller `ax` |
-| `SPRING_REST_FRAC` | 0.16 | Spring rest length as a fraction of min(w,h) — the idle handle offset |
+| `SPRING_REST_FRAC` | 0.06 | Spring rest length as a fraction of min(w,h) — the idle handle offset |
 | `HANDLE_GRAB_RADIUS_FRAC` / `_MARKER_` | 1/6 / 1/15 | Handle finger hit-target / drawn radius |
 | `USE_CHAIN_WRAP` | true | Horizontal-only toroidal wrap of the whole scene |
 
@@ -119,7 +120,7 @@ Counters surfaced in the HUD / `[E]` log: `halveΣ` (slices halved), `rejΣ` (sl
 ## Open / in progress
 
 - **Reset on "cannot proceed."** Instead of coasting at the floor, auto-reset the chain (with a blow sound) when even halving can't solve — on a *sustained*-failure trigger (K consecutive coast-frames), so isolated harmless coasts don't reset. Discussed, not built.
-- **Whip crack via mass taper.** A real whip cracks because it's lighter toward the tip: the impedance `√(T·μ)` drops, so the traveling wave's velocity amplifies. Uniform `particleMass` gives a traveling wave but no crack. Add a tip-ward mass taper (stiffness taper secondary).
+- **Whip crack via mass taper — implemented, tuning open.** A real whip cracks because it's lighter toward the tip: the impedance `√(T·μ)` drops, so the traveling wave's velocity amplifies. The tip-ward mass taper is now in (`MASS_TAPER`, head:tip ratio, default 20). Open work: tune it (does it visibly crack, and at what ratio?) and add a secondary *stiffness* taper if mass alone isn't enough.
 - **Open mystery — pinned wound state.** A heavily-wound chain leaves a frozen wound state (`max|Δθ|` and `bendPE` essentially constant) with a tiny non-decaying wiggle that relaxes only over ~hours. Possibly the same as a 12-hour overnight observation; unconfirmed, and may never be resolved — because we have since dramatically increased the `BENDING_EI` constant, so the chain no longer reaches the heavily-wound regime that produced it.
 - **Performance.** The dense O(N³) Newton solve dominates. M is **dense, not banded** (the lumped-mass `μ` couples every joint pair), so a banded solver doesn't apply; the real O(N) lever is the articulated-body / Featherstone recursion (never forms M) — a larger reformulation.
 - **Parked feel items.** The anchor/handle marker & grab radii (fractions of `min(w,h)`) are provisional and to be revisited with the reference scale; the spring/handle wrap reads slightly oddly when the anchor crosses a seam.

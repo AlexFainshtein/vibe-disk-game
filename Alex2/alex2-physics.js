@@ -37,18 +37,29 @@ const N = 50;   // number of particles in the chain (joints = N − 1)
 // Chain total length = max(ROPE_LENGTH_FRACTION·width, ROPE_LENGTH_FRACTION_H·height).
 // The height term keeps the chain a useful length on narrow/tall screens
 // (e.g. a folded foldable) where width alone makes it too short.
-const ROPE_LENGTH_FRACTION   = 0.45;   // of canvas width
-const ROPE_LENGTH_FRACTION_H = 0.3;    // of canvas height
+const ROPE_LENGTH_FRACTION   = 0.45; // of canvas width
+const ROPE_LENGTH_FRACTION_H = 0.8; // was 0.3;    // of canvas height
 
 // Initial chain orientation (all joints equal → straight, no bending force).
 // π/2 = straight down: on a narrow screen a horizontal chain runs off-frame,
 // and "hanging down" is the natural rest pose (and matches gravity, later).
 const INITIAL_THETA = Math.PI / 2;
 
-// Total chain mass (excluding anchor). Distributed uniformly across the
-// N−1 non-anchor particles. Combined with the Lagrangian formulation,
-// dynamics should be approximately N-invariant.
-const M_ROPE = 1;
+// Total chain mass (excluding anchor), conserved regardless of the taper
+// below. Combined with the Lagrangian formulation, dynamics should be
+// approximately N-invariant.
+const M_ROPE = 1; // was 100 was 1000;  // total mass of the chain (px·s²), excluding the anchor; tunable for feel
+
+// Tip-ward mass taper (whip-crack mechanism). Particle masses run from
+// MASS_TAPER·(mean) at the head (joint 0) down to (mean) at the tip
+// (joint Ns−1), linearly; i.e. MASS_TAPER is the head:tip mass ratio.
+// 1 = uniform (no taper). A lighter tip drops the impedance √(T·μ) toward
+// the end, so a travelling wave speeds up and can crack. Total mass is
+// renormalized to M_ROPE, so only the *distribution* changes, not the
+// chain's weight (gravity/feel preserved). Set ≈ N for the linear (N−i)
+// profile; dial up for a sharper crack, down toward 1 to compare.
+const MASS_TAPER = 25; // was 50; // was 20;
+
 
 // Internal RK4 substepping: per real frame, do RK4_SUBSTEPS_PER_FRAME
 // RK4 steps each of size h/RK4_SUBSTEPS_PER_FRAME, holding ax/ay constant
@@ -84,16 +95,16 @@ const ANCHOR_KEY_VELOCITY_STEP = 50;
 //     control. Direct mode bypasses the spring, so it re-exposes the
 //     blow-up — testing only, not exposed to the end user.
 const USE_ANCHOR_SPRING       = true;
-const SPRING_K                = 800; // was 400  // stiffness (px/s² per px of stretch, per unit anchor mass)
+const SPRING_K                = 800; // stiffness (px/s² per px of stretch, per unit anchor mass)
 const SPRING_DAMP             = 25; // damping on anchor velocity (≈ near-critical at K=200, m=2)
 const ANCHOR_MASS             = 2;      // anchor inertia; bigger = smoother/laggier, smaller ax
-const SPRING_REST_FRAC        = 0.16;   // spring rest length as a fraction of min(canvas w,h) — the idle handle offset below the anchor
+const SPRING_REST_FRAC        = 0.06; // was 0.16;  // spring rest length as a fraction of min(canvas w,h) — the idle handle offset below the anchor
 const HANDLE_GRAB_RADIUS_FRAC = 1 / 6; // finger hit target for the handle (big, for narrow screens)
-const HANDLE_MARKER_RADIUS_FRAC = 1 / 15; // drawn handle radius
+const HANDLE_MARKER_RADIUS_FRAC = 1 / 45; // was 1 / 15; // drawn handle radius
 const HANDLE_COLOR            = 'rgba(136, 192, 208, 0.55)'; // semi-transparent so the string shows through
 const SPRING_COIL_COLOR       = 'rgba(160, 170, 180, 0.7)';
-const SPRING_COIL_TURNS       = 8;      // zigzag turns drawn between anchor and handle
-const SPRING_COIL_AMPLITUDE_FRAC = 1 / 90; // coil width as a fraction of min(canvas w,h)
+const SPRING_COIL_TURNS       = 2; // was 8;      // zigzag turns drawn between anchor and handle
+const SPRING_COIL_AMPLITUDE_FRAC = 1 / 150; // was 1 / 90; // coil width as a fraction of min(canvas w,h)
 
 // Toroidal wrap: the part of the chain that leaves the frame reappears on the
 // opposite edge. Purely visual (no collisions in this variant) — the renderer
@@ -107,7 +118,7 @@ const USE_CHAIN_WRAP = true;
 // property). Higher = stiffer, but too high will require smaller dt for
 // RK4 stability. Set to 0 to disable bending entirely (chain is a free
 // jointed pendulum with no restoring force).
-const BENDING_EI = 500000;   // continuum flexural rigidity; k_θ = BENDING_EI / L. Sweet spot ~100K–1M (holds shape, kinks spring straight, still far from a rigid rod). EI=1 was ~3 orders too weak — kinks froze.
+const BENDING_EI = 5000 * M_ROPE;   // continuum flexural rigidity; k_θ = BENDING_EI / L. Tied to M_ROPE because only the ratio EI/M_ROPE sets the bending-vs-inertia balance — the conservative dynamics are invariant if both scale together. (DAMPING_BEND is tied the same way; VISCOUS_DRAG is mass-proportional so it stays invariant without a tie — so the FULL damped dynamics are M_ROPE-invariant.) Current ratio = 5000 (whip/wave working point). Toward ratio ~1 kinks freeze/wind; much higher holds a stiff shape.
 
 // --- Damping (non-conservative; added directly to the EOM, not Lagrangian) ---
 //
@@ -116,14 +127,17 @@ const BENDING_EI = 500000;   // continuum flexural rigidity; k_θ = BENDING_EI /
 // Pulls each joint's angular velocity toward its neighbors'. Has *zero
 // effect* on rigid rotation (all θ̇ equal → Laplacian = 0), so the chain
 // can still spin freely; but suppresses high-frequency / alternating-sign
-// modes exponentially. Analog of stiffness-proportional Rayleigh damping.
+// modes exponentially. Analog of stiffness-proportional Rayleigh damping —
+// and like bending, a stiffness-like force that does NOT scale with mass, so
+// it's tied to M_ROPE (below) to keep its effect DAMPING_BEND/M_ROPE
+// mass-invariant. (VISCOUS_DRAG is mass-proportional, so it needs no such tie.)
 //
 // Added inline to the conservative RHS (see buildRhs), so it goes through
 // RK4 with everything else. This is explicit integration, so c is bounded
 // by RK4's stability region: roughly c · max_eigenvalue(M⁻¹·D) · h < 2.78.
 // At N=100 with h≈1/60 that puts the upper limit somewhere around c ≈ 1;
 // keep this in mind when raising the value.
-const DAMPING_BEND = 1000;
+const DAMPING_BEND = 100 * M_ROPE; // was 1000; ratio DAMPING_BEND/M_ROPE = 100 (tied to M_ROPE like BENDING_EI)
 
 // VISCOUS_DRAG: viscous drag. Subtracts α · θ̇ from θ̈ each
 // frame, so the time constant of every mode decays at rate α regardless of
@@ -140,7 +154,7 @@ const VISCOUS_DRAG = 0.5; // was 0.1, 0
 // Equivalence-principle check: if the anchor free-falls (ay=g), Q_anchor's
 // −cos θ_j·ay exactly cancels Q_grav, so a free-falling chain doesn't deform.
 // Set to 0 to disable. Tunable for feel.
-const GRAVITY = 1000;   // downward acceleration (px/s²) on the chain + anchor; 0 disables
+const GRAVITY = 100; // was 1000;   // downward acceleration (px/s²) on the chain + anchor; 0 disables
 // --- Implicit integrators (experimental, B3 in our discussion) --------
 //
 // INTEGRATOR: 'rk4' (explicit, the old default), 'implicit-midpoint'
@@ -233,14 +247,30 @@ function makeRope(N, baseX, baseY, opts = {}){
   const Ns = N - 1;                                      // number of segments / angles
   const chainLength   = Math.max(canvas.width * ROPE_LENGTH_FRACTION, canvas.height * ROPE_LENGTH_FRACTION_H);
   const segmentLength = opts.segmentLength ?? chainLength / Ns;
-  const particleMass  = opts.particleMass  ?? M_ROPE / Ns;
-  // μ_{jk} = Σ_{i ≥ max(j,k)} m_i  with uniform mass.
-  // For uniform mass this is (Ns − max(j,k)) · particleMass when we index
-  // angles from 0. (Angle k controls particles k..Ns−1 in 0-indexed terms.)
-  // We precompute the diagonal μ_{jj} since it appears in many spots.
-  const muDiag = new Float64Array(Ns);
+  const particleMass  = opts.particleMass  ?? M_ROPE / Ns;   // mean per-particle mass (sets total)
+  // Per-particle masses m_i, optionally tapered tip-ward via MASS_TAPER:
+  // heavier at the head (j=0), lighter at the tip (j=Ns−1), linearly. We
+  // normalize so the total Σ m_i = Ns·particleMass is conserved — only the
+  // distribution shifts, not the chain's weight.
+  const totalMass = particleMass * Ns;
+  const denom = Ns > 1 ? Ns - 1 : 1;
+  const m_i = new Float64Array(Ns);
+  let wsum = 0;
   for(let j = 0; j < Ns; j++){
-    muDiag[j] = (Ns - j) * particleMass;
+    const w = 1 + (MASS_TAPER - 1) * (Ns - 1 - j) / denom;   // head=MASS_TAPER, tip=1
+    m_i[j] = w;
+    wsum += w;
+  }
+  const massNorm = totalMass / wsum;
+  for(let j = 0; j < Ns; j++) m_i[j] *= massNorm;
+  // μ_{jk} = Σ_{i ≥ max(j,k)} m_i = the reverse cumulative sum of m_i at
+  // max(j,k). We precompute the diagonal μ_{jj} = Σ_{i≥j} m_i; off-diagonals
+  // are just muDiag[max(j,k)], used throughout buildMassMatrix/Rhs/Jacobian.
+  const muDiag = new Float64Array(Ns);
+  let acc = 0;
+  for(let j = Ns - 1; j >= 0; j--){
+    acc += m_i[j];
+    muDiag[j] = acc;
   }
   return {
     N, Ns, segmentLength, particleMass, muDiag,
@@ -332,7 +362,7 @@ function makeRope(N, baseX, baseY, opts = {}){
   };
 }
 
-const ropes = [makeRope(N, canvas.width / 2, canvas.height * 0.5)];
+const ropes = [makeRope(N, canvas.width / 2, canvas.height * 0.05)]; // was 0.5
 for(const rope of ropes) rope.theta.fill(INITIAL_THETA);   // hang straight down at start
 
 // Debug perturbation: add a smooth half-sine bump to the chain's θ̇ WITHOUT
@@ -540,16 +570,16 @@ window.addEventListener('keydown', (e) => {
 // --- Equations of motion -----------------------------------------------
 
 // Build M(θ) into rope.M (row-major, size Ns × Ns).
-// M_{jk} = L² · cos(θ_j − θ_k) · μ_{jk}, where μ_{jk} = (Ns − max(j,k)) · m
+// M_{jk} = L² · cos(θ_j − θ_k) · μ_{jk}, where μ_{jk} = muDiag[max(j,k)]
 function buildMassMatrix(rope, theta){
   const Ns = rope.Ns;
   const L  = rope.segmentLength;
-  const m  = rope.particleMass;
   const M  = rope.M;
+  const muDiag = rope.muDiag;
   const L2 = L * L;
   for(let j = 0; j < Ns; j++){
     for(let k = 0; k < Ns; k++){
-      const mu = (Ns - Math.max(j, k)) * m;
+      const mu = muDiag[Math.max(j, k)];
       M[j * Ns + k] = L2 * Math.cos(theta[j] - theta[k]) * mu;
     }
   }
@@ -566,7 +596,6 @@ function buildMassMatrix(rope, theta){
 function buildRhs(rope, theta, thetaDot, ax, ay){
   const Ns      = rope.Ns;
   const L       = rope.segmentLength;
-  const m       = rope.particleMass;
   const muDiag  = rope.muDiag;
   const rhs     = rope.rhs;
   const L2      = L * L;
@@ -575,7 +604,7 @@ function buildRhs(rope, theta, thetaDot, ax, ay){
     let qAnchor = L * muDiag[j] * (Math.sin(theta[j]) * ax - Math.cos(theta[j]) * ay);
     let cj = 0;
     for(let k = 0; k < Ns; k++){
-      const mu = (Ns - Math.max(j, k)) * m;
+      const mu = muDiag[Math.max(j, k)];
       cj += L2 * mu * Math.sin(theta[j] - theta[k]) * thetaDot[k] * thetaDot[k];
     }
     // Strain-rate damping (linear, discrete Laplacian on θ̇, free ends).
@@ -918,7 +947,6 @@ function rk4Step(rope, h, ax, ay){
 function buildJacobianBlocks(rope, theta, thetaDot, ddt, ax, ay){
   const Ns         = rope.Ns;
   const L          = rope.segmentLength;
-  const m          = rope.particleMass;
   const muDiag     = rope.muDiag;
   const L2         = L * L;
   const kTheta     = BENDING_EI / L;
@@ -941,7 +969,7 @@ function buildJacobianBlocks(rope, theta, thetaDot, ddt, ax, ay){
   for(let i = 0; i < Ns; i++){
     let s = 0;
     for(let j = 0; j < Ns; j++){
-      const mu = (Ns - Math.max(i, j)) * m;
+      const mu = muDiag[Math.max(i, j)];
       s += L2 * mu * Math.sin(theta[i] - theta[j]) * w[j];
     }
     S[i] = s;
@@ -961,12 +989,12 @@ function buildJacobianBlocks(rope, theta, thetaDot, ddt, ax, ay){
     // −∂C_i/∂θ_k: off-diagonal piece +L²·μ_ik·cos(θ_i−θ_k)·θ̇_k² for all i,
     // plus a diagonal correction −Σ_l L²·μ_kl·cos(θ_k−θ_l)·θ̇_l² at i = k.
     for(let i = 0; i < Ns; i++){
-      const muIK = (Ns - Math.max(i, k)) * m;
+      const muIK = muDiag[Math.max(i, k)];
       A[i * Ns + k] += L2 * muIK * Math.cos(theta[i] - theta[k]) * tdk2;
     }
     let sumC = 0;
     for(let l = 0; l < Ns; l++){
-      const muKL = (Ns - Math.max(k, l)) * m;
+      const muKL = muDiag[Math.max(k, l)];
       sumC += L2 * muKL * Math.cos(theta[k] - theta[l]) * thetaDot[l] * thetaDot[l];
     }
     A[k * Ns + k] -= sumC;
@@ -975,7 +1003,7 @@ function buildJacobianBlocks(rope, theta, thetaDot, ddt, ax, ay){
     // → row i: −L²·μ_ik·sin(θ_i−θ_k)·w_k for all i (vanishes at i=k since sin 0 = 0)
     //   plus +S_k at i = k (the δ_ki piece).
     for(let i = 0; i < Ns; i++){
-      const muIK = (Ns - Math.max(i, k)) * m;
+      const muIK = muDiag[Math.max(i, k)];
       A[i * Ns + k] -= L2 * muIK * Math.sin(theta[i] - theta[k]) * w[k];
     }
     A[k * Ns + k] += S[k];
@@ -1000,7 +1028,7 @@ function buildJacobianBlocks(rope, theta, thetaDot, ddt, ax, ay){
   // Dense parts: −∂C/∂θ̇_m and −α·M.
   for(let j = 0; j < Ns; j++){
     for(let mm = 0; mm < Ns; mm++){
-      const muJM = (Ns - Math.max(j, mm)) * m;
+      const muJM = muDiag[Math.max(j, mm)];
       B[j * Ns + mm] -= 2 * L2 * muJM * Math.sin(theta[j] - theta[mm]) * thetaDot[mm];
       B[j * Ns + mm] -= VISCOUS_DRAG * M[j * Ns + mm];
     }
