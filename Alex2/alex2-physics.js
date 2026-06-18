@@ -60,6 +60,15 @@ const M_ROPE = 1; // was 100 was 1000;  // total mass of the chain (px·s²), ex
 // profile; dial up for a sharper crack, down toward 1 to compare.
 const MASS_TAPER = 25; // was 50; // was 20;
 
+// Bending stiffness (and strain-rate damping) taper with the local mass:
+// EI ∝ μ^p, since for a rod μ ∝ r² and EI ∝ r⁴ → p = 2 is physical. p = 0
+// decouples stiffness from mass (uniform stiffness even under a mass taper);
+// p = 1 is a gentle middle. Applied as a per-edge factor (m_edge/m̄)^p relative
+// to the mean mass, so a uniform rope is unchanged and M_ROPE stays invariant.
+// NB: with MASS_TAPER=25, p=2 gives a 25²=625 head:tip stiffness ratio — a very
+// floppy tip; dial MASS_TAPER or p down if it winds/destabilizes.
+const STIFFNESS_MASS_EXPONENT = 2;
+
 
 // Internal RK4 substepping: per real frame, do RK4_SUBSTEPS_PER_FRAME
 // RK4 steps each of size h/RK4_SUBSTEPS_PER_FRAME, holding ax/ay constant
@@ -95,9 +104,9 @@ const ANCHOR_KEY_VELOCITY_STEP = 50;
 //     control. Direct mode bypasses the spring, so it re-exposes the
 //     blow-up — testing only, not exposed to the end user.
 const USE_ANCHOR_SPRING       = true;
-const SPRING_K                = 800; // stiffness (px/s² per px of stretch, per unit anchor mass)
-const SPRING_DAMP             = 25; // damping on anchor velocity (≈ near-critical at K=200, m=2)
-const ANCHOR_MASS             = 2;      // anchor inertia; bigger = smoother/laggier, smaller ax
+const SPRING_K                = 1500; // was 800; // stiffness (px/s² per px of stretch, per unit anchor mass)
+const SPRING_DAMP             = 50; // was 25; // damping on anchor velocity (≈ near-critical at K=200, m=2)
+const ANCHOR_MASS             = 2 * M_ROPE; // was 2;      // anchor inertia; bigger = smoother/laggier, smaller ax
 const SPRING_REST_FRAC        = 0.06; // was 0.16;  // spring rest length as a fraction of min(canvas w,h) — the idle handle offset below the anchor
 const HANDLE_GRAB_RADIUS_FRAC = 1 / 6; // finger hit target for the handle (big, for narrow screens)
 const HANDLE_MARKER_RADIUS_FRAC = 1 / 45; // was 1 / 15; // drawn handle radius
@@ -118,7 +127,7 @@ const USE_CHAIN_WRAP = true;
 // property). Higher = stiffer, but too high will require smaller dt for
 // RK4 stability. Set to 0 to disable bending entirely (chain is a free
 // jointed pendulum with no restoring force).
-const BENDING_EI = 5000 * M_ROPE;   // continuum flexural rigidity; k_θ = BENDING_EI / L. Tied to M_ROPE because only the ratio EI/M_ROPE sets the bending-vs-inertia balance — the conservative dynamics are invariant if both scale together. (DAMPING_BEND is tied the same way; VISCOUS_DRAG is mass-proportional so it stays invariant without a tie — so the FULL damped dynamics are M_ROPE-invariant.) Current ratio = 5000 (whip/wave working point). Toward ratio ~1 kinks freeze/wind; much higher holds a stiff shape.
+const BENDING_EI = 3e5 * M_ROPE; // was 5000;  // continuum flexural rigidity; k_θ = BENDING_EI / L. Tied to M_ROPE because only the ratio EI/M_ROPE sets the bending-vs-inertia balance — the conservative dynamics are invariant if both scale together. (DAMPING_BEND is tied the same way; VISCOUS_DRAG is mass-proportional so it stays invariant without a tie — so the FULL damped dynamics are M_ROPE-invariant.) Toward ratio ~1 kinks freeze/wind; much higher holds a stiff shape.
 
 // --- Damping (non-conservative; added directly to the EOM, not Lagrangian) ---
 //
@@ -137,7 +146,7 @@ const BENDING_EI = 5000 * M_ROPE;   // continuum flexural rigidity; k_θ = BENDI
 // by RK4's stability region: roughly c · max_eigenvalue(M⁻¹·D) · h < 2.78.
 // At N=100 with h≈1/60 that puts the upper limit somewhere around c ≈ 1;
 // keep this in mind when raising the value.
-const DAMPING_BEND = 100 * M_ROPE; // was 1000; ratio DAMPING_BEND/M_ROPE = 100 (tied to M_ROPE like BENDING_EI)
+const DAMPING_BEND = 1e3 * M_ROPE; // was 1000; tied to M_ROPE like BENDING_EI (stiffness-proportional)
 
 // VISCOUS_DRAG: viscous drag. Subtracts α · θ̇ from θ̈ each
 // frame, so the time constant of every mode decays at rate α regardless of
@@ -272,8 +281,21 @@ function makeRope(N, baseX, baseY, opts = {}){
     acc += m_i[j];
     muDiag[j] = acc;
   }
+  // Per-edge bending-stiffness profile: thinner (lighter) sections bend more
+  // easily. EI ∝ μ^p for a rod (μ ∝ r², EI ∝ r⁴ → p = 2 physical). Stored as a
+  // dimensionless factor (m_edge/m̄)^p relative to the mean mass, so a uniform
+  // rope gives bendScale = 1 (exact current behavior) and p = 0 decouples
+  // stiffness from mass. Edge e is between joints e and e+1; we use their mean
+  // mass. The same factor scales the strain-rate damping (stiffness-proportional),
+  // and because it's a mass *ratio* it leaves the M_ROPE-invariance intact.
+  const mBar = totalMass / Ns;
+  const bendScale = new Float64Array(Ns > 1 ? Ns - 1 : 0);
+  for(let e = 0; e < bendScale.length; e++){
+    const mEdge = 0.5 * (m_i[e] + m_i[e + 1]);
+    bendScale[e] = Math.pow(mEdge / mBar, STIFFNESS_MASS_EXPONENT);
+  }
   return {
-    N, Ns, segmentLength, particleMass, muDiag,
+    N, Ns, segmentLength, particleMass, muDiag, bendScale,
     baseX, baseY,
     theta:    new Float64Array(Ns),                       // all angles = 0 → chain horizontal
     thetaDot: new Float64Array(Ns),
@@ -597,6 +619,7 @@ function buildRhs(rope, theta, thetaDot, ax, ay){
   const Ns      = rope.Ns;
   const L       = rope.segmentLength;
   const muDiag  = rope.muDiag;
+  const bendScale = rope.bendScale;
   const rhs     = rope.rhs;
   const L2      = L * L;
   const kTheta  = BENDING_EI / L;
@@ -607,36 +630,25 @@ function buildRhs(rope, theta, thetaDot, ax, ay){
       const mu = muDiag[Math.max(j, k)];
       cj += L2 * mu * Math.sin(theta[j] - theta[k]) * thetaDot[k] * thetaDot[k];
     }
-    // Strain-rate damping (linear, discrete Laplacian on θ̇, free ends).
-    let qDamp = 0;
-    if(Ns >= 2){
-      let lapThetaDot;
-      if(j === 0){
-        lapThetaDot = thetaDot[1] - thetaDot[0];
-      } else if(j === Ns - 1){
-        lapThetaDot = thetaDot[Ns - 2] - thetaDot[Ns - 1];
-      } else {
-        lapThetaDot = thetaDot[j - 1] - 2 * thetaDot[j] + thetaDot[j + 1];
-      }
-      qDamp = DAMPING_BEND * lapThetaDot;
-    }
-    // Linear bending — discrete Laplacian of θ scaled by k_θ, Neumann
-    // (free-end) BCs.  The previous tan(Δθ/2) anti-folding model was
-    // physically wrong (periodic in Δθ, can flip the bending sign and
-    // create a runaway under sustained forcing).  Linear bending grows
-    // monotonically with |Δθ| → always restoring → robust under any
+    // Linear bending (discrete Laplacian of θ) and strain-rate damping
+    // (discrete Laplacian of θ̇), both per-edge: edge e (between joints e and
+    // e+1) carries kTheta·bendScale[e] for bending and DAMPING_BEND·bendScale[e]
+    // for damping, with Neumann (free-end) BCs. Uniform mass → bendScale = 1 →
+    // the plain constant-coefficient Laplacian. Linear (non-periodic) bending
+    // grows monotonically with |Δθ| → always restoring → robust under any
     // forcing, at the cost of allowing the rope to wind into loops.
-    let qBend = 0;
-    if(Ns >= 2 && BENDING_EI !== 0){
-      let lapTheta;
-      if(j === 0){
-        lapTheta = theta[1] - theta[0];
-      } else if(j === Ns - 1){
-        lapTheta = theta[Ns - 2] - theta[Ns - 1];
-      } else {
-        lapTheta = theta[j - 1] - 2 * theta[j] + theta[j + 1];
+    let qDamp = 0, qBend = 0;
+    if(Ns >= 2){
+      if(j < Ns - 1){
+        const sc = bendScale[j];
+        qDamp += DAMPING_BEND * sc * (thetaDot[j + 1] - thetaDot[j]);
+        qBend += kTheta       * sc * (theta[j + 1]    - theta[j]);
       }
-      qBend = kTheta * lapTheta;
+      if(j > 0){
+        const sc = bendScale[j - 1];
+        qDamp -= DAMPING_BEND * sc * (thetaDot[j] - thetaDot[j - 1]);
+        qBend -= kTheta       * sc * (theta[j]    - theta[j - 1]);
+      }
     }
     // Gravity: generalized force from a uniform downward (+y) field.
     // Q_grav_j = g·L·μ_jj·cos θ_j (zero at θ=π/2 → straight-down equilibrium).
@@ -948,6 +960,7 @@ function buildJacobianBlocks(rope, theta, thetaDot, ddt, ax, ay){
   const Ns         = rope.Ns;
   const L          = rope.segmentLength;
   const muDiag     = rope.muDiag;
+  const bendScale  = rope.bendScale;
   const L2         = L * L;
   const kTheta     = BENDING_EI / L;
   const A          = rope.A_raw;
@@ -1009,17 +1022,19 @@ function buildJacobianBlocks(rope, theta, thetaDot, ddt, ax, ay){
     A[k * Ns + k] += S[k];
   }
 
-  // Linear bending: tridiagonal contribution to A_raw with constant
-  // weight V''(Δθ) = kTheta.  Neumann BCs (free ends).
+  // Linear bending: per-edge tridiagonal contribution to A_raw. Edge e
+  // (between joints e and e+1) has stiffness kTheta·bendScale[e]. Neumann BCs.
   if(BENDING_EI !== 0 && Ns >= 2){
     for(let i = 0; i < Ns; i++){
       if(i < Ns - 1){
-        A[i * Ns + i]       -= kTheta;
-        A[i * Ns + (i + 1)] += kTheta;
+        const ke = kTheta * bendScale[i];
+        A[i * Ns + i]       -= ke;
+        A[i * Ns + (i + 1)] += ke;
       }
       if(i > 0){
-        A[i * Ns + i]       -= kTheta;
-        A[i * Ns + (i - 1)] += kTheta;
+        const ke = kTheta * bendScale[i - 1];
+        A[i * Ns + i]       -= ke;
+        A[i * Ns + (i - 1)] += ke;
       }
     }
   }
@@ -1034,18 +1049,21 @@ function buildJacobianBlocks(rope, theta, thetaDot, ddt, ax, ay){
     }
   }
 
-  // Strain-rate damping: tridiagonal contribution (Neumann BCs).
+  // Strain-rate damping: per-edge tridiagonal contribution (Neumann BCs).
+  // Edge e carries DAMPING_BEND·bendScale[e] (same profile as bending).
   if(DAMPING_BEND !== 0 && Ns >= 2){
-    const c = DAMPING_BEND;
-    B[0 * Ns + 0] -= c;
-    B[0 * Ns + 1] += c;
-    for(let j = 1; j < Ns - 1; j++){
-      B[j * Ns + (j - 1)] += c;
-      B[j * Ns + j]       -= 2 * c;
-      B[j * Ns + (j + 1)] += c;
+    for(let j = 0; j < Ns; j++){
+      if(j < Ns - 1){
+        const ce = DAMPING_BEND * bendScale[j];
+        B[j * Ns + j]       -= ce;
+        B[j * Ns + (j + 1)] += ce;
+      }
+      if(j > 0){
+        const ce = DAMPING_BEND * bendScale[j - 1];
+        B[j * Ns + j]       -= ce;
+        B[j * Ns + (j - 1)] += ce;
+      }
     }
-    B[(Ns - 1) * Ns + (Ns - 2)] += c;
-    B[(Ns - 1) * Ns + (Ns - 1)] -= c;
   }
 }
 
