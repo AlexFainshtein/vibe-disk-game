@@ -19,17 +19,17 @@ copy sound.js public\
 copy controls.js public\
 copy style.css public\
 mkdir public\Alex
-for %%f in (Alex\*) do copy /y %%f public\Alex\
+for %%f in (Alex\*) do copy /y "%%f" public\Alex\
 mkdir public\Alex1
-for %%f in (Alex1\*) do copy /y %%f public\Alex1\
+for %%f in (Alex1\*) do copy /y "%%f" public\Alex1\
 mkdir public\Alex2
-for %%f in (Alex2\*) do copy /y %%f public\Alex2\
+for %%f in (Alex2\*) do copy /y "%%f" public\Alex2\
 mkdir public\Eugene
-for %%f in (Eugene\*) do copy /y %%f public\Eugene\
+for %%f in (Eugene\*) do copy /y "%%f" public\Eugene\
 mkdir public\Zen1
-for %%f in (Zen1\*) do copy /y %%f public\Zen1\
+for %%f in (Zen1\*) do copy /y "%%f" public\Zen1\
 mkdir public\game2
-for %%f in (game2\*) do copy /y %%f public\game2\
+for %%f in (game2\*) do copy /y "%%f" public\game2\
 if "%1"=="" (
   firebase deploy
 ) else (

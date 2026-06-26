@@ -8,12 +8,11 @@ cp index.html main.js state.js playfield.js og-preview.png \
    controller-spring-drag.js render.js input.js sound.js controls.js style.css \
    public/
 
-cp Alex/* public/Alex/
-cp Alex1/* public/Alex1/
-cp Alex2/* public/Alex2/
-cp Eugene/* public/Eugene/
-cp Zen1/* public/Zen1/
-cp game2/* public/game2/
+# Copy each variant folder's top-level files only — skip subdirectories like
+# Alex2/tests and Alex2/artifacts (-type f also sidesteps space-in-name issues).
+for d in Alex Alex1 Alex2 Eugene Zen1 game2; do
+  find "$d" -maxdepth 1 -type f -exec cp {} "public/$d/" \;
+done
 
 if [ $# -eq 0 ]; then
   firebase deploy

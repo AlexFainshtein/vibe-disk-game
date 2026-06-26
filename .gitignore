@@ -93,3 +93,6 @@ public/
 /Alex2/alex2-input-*
 # Alex2 chat/reference scratch docs
 /Alex2/chat2 - Equations.md
+
+# Alex2 working artifacts (data dumps + scratch docs) — kept locally, not deployed
+/Alex2/artifacts/
